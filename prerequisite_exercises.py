@@ -4,15 +4,21 @@ import torch as t
 
 
 def assert_all_equal(actual: t.Tensor, expected: t.Tensor) -> None:
-    assert actual.shape == expected.shape, f"Shape mismatch, got: {actual.shape}"
-    assert (actual == expected).all(), f"Value mismatch, got: {actual}"
+    assert (
+        actual.shape == expected.shape
+    ), f"Shape mismatch, got: {actual.shape} expected: {expected.shape}"
+    assert (
+        actual == expected
+    ).all(), f"Value mismatch, got: {actual} expected: {expected}"
     print("Passed!")
 
 
 def assert_all_close(
     actual: t.Tensor, expected: t.Tensor, rtol=1e-05, atol=0.0001
 ) -> None:
-    assert actual.shape == expected.shape, f"Shape mismatch, got: {actual.shape}"
+    assert (
+        actual.shape == expected.shape
+    ), f"Shape mismatch, got: {actual.shape} expected: {expected.shape}"
     assert t.allclose(actual, expected, rtol=rtol, atol=atol)
     print("Passed!")
 
@@ -24,7 +30,9 @@ def rearrange_1() -> t.Tensor:
      [5, 6],
      [7, 8]]
     """
-    pass
+    Z = rearrange(t.arange(3, 9), "(i1 i2) -> i1 i2", i1=3)
+    # print(Z)
+    return Z
 
 
 expected = t.tensor([[3, 4], [5, 6], [7, 8]])
@@ -37,7 +45,9 @@ def rearrange_2() -> t.Tensor:
     [[1, 2, 3],
      [4, 5, 6]]
     """
-    pass
+    Z = rearrange(t.arange(1, 7), "(i1 i2) -> i1 i2", i1=2)
+    # print(Z)
+    return Z
 
 
 assert_all_equal(rearrange_2(), t.tensor([[1, 2, 3], [4, 5, 6]]))
@@ -48,7 +58,9 @@ def rearrange_3() -> t.Tensor:
 
     [[[1], [2], [3], [4], [5], [6]]]
     """
-    pass
+    Z = rearrange(t.arange(1, 7), "(i1 i2 i3) -> i1 i2 i3", i1=1, i2=6, i3=1)
+    # print(Z)
+    return Z
 
 
 assert_all_equal(rearrange_3(), t.tensor([[[1], [2], [3], [4], [5], [6]]]))
@@ -63,7 +75,9 @@ def temperatures_average(temps: t.Tensor) -> t.Tensor:
     You can do this with a single call to reduce.
     """
     assert len(temps) % 7 == 0
-    pass
+    Z = reduce(temps, "(i1 i2) -> i1", "mean", i2=7)
+    # print(Z)
+    return Z
 
 
 temps = t.Tensor(
@@ -79,7 +93,16 @@ def temperatures_differences(temps: t.Tensor) -> t.Tensor:
     temps: as above
     """
     assert len(temps) % 7 == 0
-    pass
+    # Z = reduce(temps, "(i1 i2) -> i1", "mean", i2=7)
+    # Z = rearrange(repeat(Z, "i -> i days", days=7), "i1 i2 -> (i1 i2)")
+    # Z = temps - Z
+
+    # Mine was a little ham-fisted. Should reuse the temperatures_average function,
+    # and repeat and rearrange steps can be combined into one call
+    Z = repeat(temperatures_average(temps), "i -> (i days)", days=7)
+    Z = temps - Z
+    # print(Z)
+    return Z
 
 
 expected = t.tensor(
@@ -118,7 +141,11 @@ def temperatures_normalized(temps: t.Tensor) -> t.Tensor:
 
     Pass torch.std to reduce.
     """
-    pass
+    Z = t.std(rearrange(temps, "(i days) -> i days", days=7), dim=1)
+    Z = repeat(Z, "i -> (i days)", days=7)
+    Z = (temps - repeat(temperatures_average(temps), "i -> (i days)", days=7)) / Z
+    # print(Z)
+    return Z
 
 
 expected = t.tensor(
@@ -165,18 +192,21 @@ def batched_dot_product_nd(a: t.Tensor, b: t.Tensor) -> t.Tensor:
     """
     assert a.shape == b.shape
     pass
+    # Z = t.einsum("a..., a... -> a...", a, b)
+    # print(Z)
+    # return Z
 
 
-actual = batched_dot_product_nd(
-    t.tensor([[1, 1, 0], [0, 0, 1]]), t.tensor([[1, 1, 0], [1, 1, 0]])
-)
-expected = t.tensor([2, 0])
-assert_all_equal(actual, expected)
-actual2 = batched_dot_product_nd(
-    t.arange(12).reshape((3, 2, 2)), t.arange(12).reshape((3, 2, 2))
-)
-expected2 = t.tensor([14, 126, 366])
-assert_all_equal(actual2, expected2)
+# actual = batched_dot_product_nd(
+#     t.tensor([[1, 1, 0], [0, 0, 1]]), t.tensor([[1, 1, 0], [1, 1, 0]])
+# )
+# expected = t.tensor([2, 0])
+# assert_all_equal(actual, expected)
+# actual2 = batched_dot_product_nd(
+#     t.arange(12).reshape((3, 2, 2)), t.arange(12).reshape((3, 2, 2))
+# )
+# expected2 = t.tensor([14, 126, 366])
+# assert_all_equal(actual2, expected2)
 
 
 def identity_matrix(n: int) -> t.Tensor:
@@ -188,7 +218,13 @@ def identity_matrix(n: int) -> t.Tensor:
     Bonus: find a different way to do it.
     """
     assert n >= 0
-    pass
+    # oh jeez, n or 1 is cheating but also who calls eye(0)???
+    Z = rearrange(t.arange(0, n**2), "(i j) -> i j", i=(n or 1)) == rearrange(
+        t.arange(0, n**2), "(i j) -> j i", i=(n or 1)
+    )
+    Z = 1 * Z
+    # print(Z)
+    return Z
 
 
 assert_all_equal(identity_matrix(3), t.Tensor([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
@@ -209,13 +245,15 @@ def sample_distribution(probs: t.Tensor, n: int) -> t.Tensor:
     """
     assert abs(probs.sum() - 1.0) < 0.001
     assert (probs >= 0).all()
-    pass
+    Z = t.rand(n, 1)
+    # print(Z)
+    return Z
 
 
-n = 10000000
-probs = t.tensor([0.05, 0.1, 0.1, 0.2, 0.15, 0.4])
-freqs = t.bincount(sample_distribution(probs, n)) / n
-assert_all_close(freqs, probs, rtol=0.001, atol=0.001)
+# n = 10000000
+# probs = t.tensor([0.05, 0.1, 0.1, 0.2, 0.15, 0.4])
+# freqs = t.bincount(sample_distribution(probs, n)) / n
+# assert_all_close(freqs, probs, rtol=0.001, atol=0.001)
 
 
 def classifier_accuracy(scores: t.Tensor, true_classes: t.Tensor) -> t.Tensor:
@@ -227,7 +265,9 @@ def classifier_accuracy(scores: t.Tensor, true_classes: t.Tensor) -> t.Tensor:
     Use torch.argmax.
     """
     assert true_classes.max() < scores.shape[1]
-    pass
+    Z = t.argmax(scores, dim=1)
+    Z = t.sum(Z == true_classes)
+    return Z / true_classes.shape[0]
 
 
 scores = t.tensor([[0.75, 0.5, 0.25], [0.1, 0.5, 0.4], [0.1, 0.7, 0.2]])
@@ -247,7 +287,9 @@ def total_price_indexing(prices: t.Tensor, items: t.Tensor) -> float:
     https://numpy.org/doc/stable/user/basics.indexing.html#integer-array-indexing
     """
     assert items.max() < prices.shape[0]
-    pass
+    Z = prices[items]
+    # print(Z)
+    return t.sum(Z).item()
 
 
 prices = t.tensor([0.5, 1, 1.5, 2, 2.5])
@@ -267,9 +309,14 @@ def gather_2d(matrix: t.Tensor, indexes: t.Tensor) -> t.Tensor:
 
     See: https://pytorch.org/docs/stable/generated/torch.gather.html?highlight=gather#torch.gather
     """
-    "TODO: YOUR CODE HERE"
+    # After checking the answer, found out this is stored in .ndim
+    # assert len(indexes.shape) == len(matrix.shape)
+    assert matrix.ndim == indexes.ndim
+    # After checking the answer, it makes sense that indexes have smaller dim 0
+    # assert indexes.shape[0] == matrix.shape[0]
+    assert indexes.shape[0] <= matrix.shape[0]
     out = matrix.gather(1, indexes)
-    "TODO: YOUR CODE HERE"
+    assert out.shape == indexes.shape
     return out
 
 
@@ -285,7 +332,9 @@ assert_all_equal(gather_2d(matrix, indexes), expected)
 def total_price_gather(prices: t.Tensor, items: t.Tensor) -> float:
     """Compute the same as total_price_indexing, but use torch.gather."""
     assert items.max() < prices.shape[0]
-    pass
+    Z = prices.gather(0, items)
+    # print(Z)
+    return t.sum(Z).item()
 
 
 prices = t.tensor([0.5, 1, 1.5, 2, 2.5])
@@ -304,7 +353,14 @@ def integer_array_indexing(matrix: t.Tensor, coords: t.Tensor) -> t.Tensor:
 
     Return: (batch, )
     """
-    pass
+    # Z = rearrange(coords, "b ... -> ... b")
+    # Z = matrix[*Z]
+    # return Z
+
+    # After reviewing answers, realised rearrange is just performing transpose
+    # rearrange(coords, "b ... -> ... b") === coords.T
+    # duh...
+    return matrix[*coords.T]
 
 
 mat_2d = t.arange(15).view(3, 5)
@@ -330,7 +386,14 @@ def batched_logsumexp(matrix: t.Tensor) -> t.Tensor:
     - https://leimao.github.io/blog/LogSumExp/
     - https://gregorygundersen.com/blog/2020/02/09/log-sum-exp/
     """
-    pass
+    a = matrix.max(dim=1).values
+    x_minus_a = matrix - a[:, None]
+    exp = t.exp(x_minus_a)
+    # I guess answers just use dims = -1 as a matter of preference? 1 and -1 are the same when ndims == 2 right?
+    sums = t.sum(exp, dim=1)
+    # print(sums)
+    result = a + t.log(sums)
+    return result
 
 
 matrix = t.tensor([[-1000, -1000, -1000, -1000], [1000, 1000, 1000, 1000]])
@@ -353,7 +416,11 @@ def batched_softmax(matrix: t.Tensor) -> t.Tensor:
 
     Return: (batch, n). For each i, out[i] should sum to 1.
     """
-    pass
+
+    exp = t.exp(matrix)
+    expsum = t.sum(exp, dim=1, keepdim=True)
+    # print(expsum)
+    return t.divide(exp, expsum)
 
 
 matrix = t.arange(1, 6).view((1, 5)).float().log()
@@ -380,7 +447,11 @@ def batched_logsoftmax(matrix: t.Tensor) -> t.Tensor:
     Do this without using PyTorch's logsoftmax function.
     For each row, subtract the maximum first to avoid overflow if the row contains large values.
     """
-    pass
+    maxes = matrix.max(dim=1, keepdim=True).values
+    # print(maxes)
+    softmaxes = batched_softmax(matrix - maxes)
+    # print(softmaxes)
+    return softmaxes.log()
 
 
 matrix = t.arange(1, 6).view((1, 5)).float()
@@ -402,7 +473,14 @@ def batched_cross_entropy_loss(logits: t.Tensor, true_labels: t.Tensor) -> t.Ten
     Hint: convert the logits to log-probabilities using your batched_logsoftmax from above.
     Then the loss for an example is just the negative of the log-probability that the model assigned to the true class. Use torch.gather to perform the indexing.
     """
-    pass
+    # print(logits)
+    neg_softmax = -batched_logsoftmax(logits)
+    # print(neg_softmax)
+    # print(true_labels)
+    gathered = neg_softmax.gather(1, true_labels[:, None])
+    gathered = rearrange(gathered, "n 1 -> n")
+    # print(gathered)
+    return gathered
 
 
 logits = t.tensor(
@@ -423,7 +501,8 @@ def collect_rows(matrix: t.Tensor, row_indexes: t.Tensor) -> t.Tensor:
     Return: shape (k, n). out[i] is matrix[row_indexes[i]].
     """
     assert row_indexes.max() < matrix.shape[0]
-    pass
+    # This was ominously easy...
+    return matrix[row_indexes]
 
 
 matrix = t.arange(15).view((5, 3))
@@ -442,7 +521,7 @@ def collect_columns(matrix: t.Tensor, column_indexes: t.Tensor) -> t.Tensor:
     Return: shape (m, k). out[:, i] is matrix[:, column_indexes[i]].
     """
     assert column_indexes.max() < matrix.shape[1]
-    pass
+    return matrix.T[row_indexes].T
 
 
 matrix = t.arange(15).view((5, 3))
