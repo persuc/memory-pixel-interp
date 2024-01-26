@@ -1,3 +1,5 @@
+# https://github.com/Baekalfen/PyBoy/
+
 from pyboy import PyBoy
 
 pyboy = PyBoy("ROMs/super_breakout.gbc")

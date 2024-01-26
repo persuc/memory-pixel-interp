@@ -1,4 +1,4 @@
-from breakout.breakout import Runner
+from environments.python_breakout import Runner
 
 runner = Runner()
 
