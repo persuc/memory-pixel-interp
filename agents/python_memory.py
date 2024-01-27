@@ -9,10 +9,18 @@ sys.path.append(str(Path(sys.executable).parent.parent.parent))
 import main
 
 from environments.python_breakout import PythonMemoryEnv
-from DeepRLA.agents.policy_gradient_agents.PPO import PPO
 from DeepRLA.utilities.Utility_Functions import normalise_rewards
+from DeepRLA.agents.policy_gradient_agents.PPO import PPO as DeepRLAPPO
 from utils.agent_config import AgentConfig, policy_gradient_agent_params
 
+class PPO(DeepRLAPPO):
+    def get_state_size(self):
+        """Gets the state_size for the gym env into the correct shape for a neural network"""
+        return self.environment.state_size
+    
+    def get_trials(self):
+        """Gets the number of trials to average a score over"""
+        return 100
 
 class Trainer:
     def __init__(self, agent: PPO, config: AgentConfig) -> None:
@@ -88,13 +96,8 @@ class Trainer:
             
         wandb.finish()
 
-# while True:
-#     runner.step()
-#     memory = runner.memory()
-#     if not (memory[0] % 90):
-#         print(runner.memory())
-
 env = PythonMemoryEnv(False)
+
 config = AgentConfig(
     seed=1,
     environment=env,
@@ -105,7 +108,4 @@ config = AgentConfig(
 )
 agent = PPO(config)
 trainer = Trainer(agent, config)
-trainer.train(print_result=True, save_result=True, use_wandb=False)
-
-
-# from agents.policy_gradient_agents.PPO import PPO
+# trainer.train(print_result=True, save_result=True, use_wandb=False)

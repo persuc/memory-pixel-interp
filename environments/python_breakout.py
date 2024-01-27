@@ -22,11 +22,11 @@
 import math, pygame, sys
 import gym
 from gym import spaces
+from gym.envs.registration import EnvSpec
 from typing import Literal
 
 # variables------------------------------------
 bx, by = 50, 150  # board position
-
 
 # Creates a board of rectangles----------------
 def new_board(width: int, height: int):
@@ -302,9 +302,11 @@ class Runner:
             self.ball.speed,
         ]
 
-
 class PythonMemoryEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
+    env = "arena-3/PythonBreakoutMemory-v0"
+    spec: EnvSpec
+    state_size: int
 
     def __init__(self, render: bool, render_mode=None):
         self.runner = Runner(render)
@@ -314,8 +316,13 @@ class PythonMemoryEnv(gym.Env):
         self.render_mode = render_mode
 
         board_size = self.runner.board_width * self.runner.board_height
+        self.state_size = board_size + 11
+
+        max_reward = self.runner.board_width * 2 * 1 + self.runner.board_width * 2 * 4 + self.runner.board_width * 2 * 7
+
+        self.spec = EnvSpec(id=self.env, entry_point='environments.python_breakout:PythonMemoryEnv', reward_threshold=max_reward, max_episode_steps=300)
         
-        self.observation_space = spaces.Discrete(board_size + 11)
+        self.observation_space = spaces.Discrete(self.state_size)
         
         # We have 2 actions, corresponding to right, left, none
         self.action_space = spaces.Discrete(3)
@@ -327,7 +334,7 @@ class PythonMemoryEnv(gym.Env):
         }
 
     def _get_obs(self):
-        return runner.get_memory()
+        return self.runner.get_memory()
 
     def _get_info(self):
         return {}
@@ -352,6 +359,7 @@ class PythonMemoryEnv(gym.Env):
             False,
             self._get_info(),
         )
+
 
 
 # -----------------------------------------------------

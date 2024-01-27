@@ -1,5 +1,3 @@
-See https://github.com/callummcdougall/ARENA_3.0/
-
 ## Summary
 
 Core components of this project:
