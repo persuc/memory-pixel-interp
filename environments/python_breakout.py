@@ -113,19 +113,7 @@ class Runner:
             self.fpsClock = pygame.time.Clock()
             pygame.display.set_caption("Breakout")  # set title bar
 
-            self.row_colors = [
-                self.colors["r1"],
-                self.colors["r2"],
-                self.colors["r3"],
-                self.colors["r4"],
-                self.colors["r5"],
-                self.colors["r6"],
-            ]
-
-            # world objects
-            self.wall1 = pygame.Rect(20, 100, 30, 380)
-            self.wall2 = pygame.Rect(590, 100, 30, 380)
-            self.wall3 = pygame.Rect(20, 80, 600, 30)
+            self.screen = pygame.display.set_mode((640, 480))
 
             self.colors = {
                 # generic colors-------------------------------
@@ -143,7 +131,20 @@ class Runner:
                 "r5": pygame.Color(72, 160, 72),
                 "r6": pygame.Color(67, 73, 202),
             }
-            self.screen = pygame.display.set_mode((640, 480))
+
+            self.row_colors = [
+                self.colors["r1"],
+                self.colors["r2"],
+                self.colors["r3"],
+                self.colors["r4"],
+                self.colors["r5"],
+                self.colors["r6"],
+            ]
+
+            # world objects
+            self.wall1 = pygame.Rect(20, 100, 30, 380)
+            self.wall2 = pygame.Rect(590, 100, 30, 380)
+            self.wall3 = pygame.Rect(20, 80, 600, 30)
 
         self.reset()
 
@@ -303,9 +304,16 @@ class PythonMemoryEnv(gym.Env):
         self.runner = Runner(render)
         self.current_score = 0
 
+    def _get_obs(self):
+        return runner.get_memory()
+
+    def _get_info(self):
+        return {}
+
     def reset(self, seed=None, options=None):
         self.runner.reset()
         self.current_score = self.runner.score
+        return self._get_obs(), self._get_info()
 
     def step(self, action: Literal["left", "right", "none"]):
         if self.runner.ball.remaining:
@@ -315,7 +323,13 @@ class PythonMemoryEnv(gym.Env):
         else:
             reward = 0
         # obs, reward, done, ?, info
-        return runner.get_memory(), reward, runner.ball.remaining > 0, False, {}
+        return (
+            self._get_obs(),
+            reward,
+            runner.ball.remaining > 0,
+            False,
+            self._get_info(),
+        )
 
 
 # -----------------------------------------------------

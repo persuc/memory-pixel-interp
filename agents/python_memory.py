@@ -3,6 +3,8 @@ import sys
 
 sys.path.append(str(Path(sys.executable).parent.parent.parent))
 
+import main
+
 from environments.python_breakout import PythonMemoryEnv
 from DeepRLA.agents.policy_gradient_agents.PPO import PPO
 from utils.agent_config import AgentConfig, policy_gradient_agent_params
