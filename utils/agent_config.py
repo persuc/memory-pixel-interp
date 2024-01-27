@@ -10,19 +10,18 @@ class AgentConfig(object):
     seed: int
     environment: gym.Env
     num_episodes_to_run: int
-    visualise_overall_results = False
-    visualise_individual_results = False
     hyperparameters: dict  # see DeepRLA.agents.Trainer.agent_to_agent_group_dictionary
-    requirements_to_solve_game = None
+    visualise_overall_results: bool = False
+    visualise_individual_results: bool = False
     file_to_save_data_results: str | None = None
     file_to_save_results_graph: str | None = None
     use_GPU = True  # if true, agent uses "cuda:0" else "cpu"
-    overwrite_existing_results_file = False
-    save_model = False
-    standard_deviation_results = 1.0
-    randomise_random_seed = True
-    show_solution_score = False
-    debug_mode = False
+    overwrite_existing_results_file: bool = False
+    save_model_path: str | None = None
+    standard_deviation_results: float = 1.0
+    randomise_random_seed: bool = True
+    show_solution_score: bool = False
+    debug_mode: bool = False
 
 
 # %%

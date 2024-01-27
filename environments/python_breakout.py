@@ -21,19 +21,21 @@
 
 import math, pygame, sys
 import gym
+from gym import spaces
 from typing import Literal
 
 # variables------------------------------------
-dx, dy = 18, 6  # dimensions of board
 bx, by = 50, 150  # board position
 
 
 # Creates a board of rectangles----------------
-def new_board():
+def new_board(width: int, height: int):
+    # TODO: the board is laid out height x width in memory
+    # but displayed as width x height in game
     board = []
-    for x in range(dx):
+    for x in range(width):
         board.append([])
-        for _ in range(dy):
+        for _ in range(height):
             board[x].append(1)
     return board
 
@@ -68,8 +70,8 @@ class Ball:  # class for ball vars
 
 # Functions defined----------------------------
 def print_board(board, colors, screen):  # prints the board
-    for x in range(dx):
-        for y in range(dy):
+    for x in range(len(board)):
+        for y in range(len(board[0])):
             if board[x][y] == 1:
                 pygame.draw.rect(
                     screen, colors[y], (((x * 30) + bx), ((y * 12) + by), 30, 12)
@@ -103,6 +105,8 @@ def write(x, y, color, msg, font, screen):  # prints onto the screen in selected
 
 class Runner:
     render: bool
+    board_width = 18
+    board_height = 6
 
     def __init__(self, render=True):
         self.render = render
@@ -149,7 +153,7 @@ class Runner:
         self.reset()
 
     def reset(self):
-        self.board = new_board()
+        self.board = new_board(self.board_width, self.board_height)
         self.score = 0
         self.paddle = Paddle()
         self.ball = Ball()
@@ -233,8 +237,8 @@ class Runner:
 
         # check collision with bricks-------------------
         Break = False
-        for x in range(dx):
-            for y in range(dy):
+        for x in range(self.board_width):
+            for y in range(self.board_height):
                 if self.board[x][y] == 1:
                     block = pygame.Rect(30 * x + bx - 1, 12 * y + by - 1, 32, 14)
                     if block.collidepoint(self.ball.x, self.ball.y) == True:
@@ -300,9 +304,27 @@ class Runner:
 
 
 class PythonMemoryEnv(gym.Env):
-    def __init__(self, render: bool):
+    metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
+
+    def __init__(self, render: bool, render_mode=None):
         self.runner = Runner(render)
         self.current_score = 0
+
+        assert render_mode is None or render_mode in self.metadata["render_modes"], f"render_mode must be \"None\", \"human\", or \"rgb_array\""
+        self.render_mode = render_mode
+
+        board_size = self.runner.board_width * self.runner.board_height
+        
+        self.observation_space = spaces.Discrete(board_size + 11)
+        
+        # We have 2 actions, corresponding to right, left, none
+        self.action_space = spaces.Discrete(3)
+
+        self._action_to_direction = {
+            0: "right",
+            1: "left",
+            2: "none"
+        }
 
     def _get_obs(self):
         return runner.get_memory()
