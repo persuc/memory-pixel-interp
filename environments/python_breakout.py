@@ -20,6 +20,7 @@
 #####################################
 
 import math, pygame, sys
+import numpy
 import gym
 from gym import spaces
 from gym.envs.registration import EnvSpec
@@ -67,6 +68,16 @@ class Ball:  # class for ball vars
         self.yPos = (self.speed / tSlope) * self.yPos
         self.adjusted = True
 
+    def reset(self, rng: numpy.random.Generator):
+        self.x = 53 + 480 * rng.random()
+        self.y = 300
+        self.xPos = 1
+        self.yPos = 1
+        self.adjusted = False
+        self.speed = 5
+        self.collisions, self.speed = 0, 5
+        self.alive = True
+
 
 # Functions defined----------------------------
 def print_board(board, colors, screen):  # prints the board
@@ -107,9 +118,11 @@ class Runner:
     render: bool
     board_width = 18
     board_height = 6
+    rng: numpy.random.Generator
 
     def __init__(self, render=True):
         self.render = render
+        self.rng = numpy.random.default_rng(seed=None)
 
         if self.render:
             pygame.init()
@@ -152,11 +165,16 @@ class Runner:
 
         self.reset()
 
+    def seed(self, seed: int) -> None:
+        self.rng = numpy.random.default_rng(seed=seed)
+        self.reset()
+
     def reset(self):
         self.board = new_board(self.board_width, self.board_height)
         self.score = 0
         self.paddle = Paddle()
         self.ball = Ball()
+        self.ball.reset(self.rng)
         if self.render:
             self.screen.fill(self.colors["black"])
         self.steps = 0
@@ -174,17 +192,9 @@ class Runner:
                 pygame.quit()
 
         if not self.ball.alive:
-            # starting variables
-            self.ball.alive = True
-            self.ball.x = 53
-            self.ball.y = 300
-            self.ball.collisions, self.ball.speed = 0, 5
             colO = False
             colR = False
-            self.ball.speed = 5
-            self.ball.xPos = 1
-            self.ball.yPos = 1
-            self.ball.adjusted = False
+            self.ball.reset(self.rng)
 
     def game(self, colO, colR):
         if self.render:
@@ -338,6 +348,9 @@ class PythonMemoryEnv(gym.Env):
 
     def _get_info(self):
         return {}
+    
+    def seed(self, seed: int) -> None:
+        self.runner.seed(seed)
 
     def reset(self, seed=None, options=None):
         self.runner.reset()
@@ -365,6 +378,7 @@ class PythonMemoryEnv(gym.Env):
 # -----------------------------------------------------
 if __name__ == "__main__":
     runner = Runner()
+    runner.seed(0)
     while runner.ball.remaining > 0:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
