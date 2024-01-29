@@ -281,7 +281,7 @@ class Runner:
 
         if self.render:
             pygame.display.update()
-        self.fpsClock.tick(30)
+            self.fpsClock.tick(30)
 
     def get_memory(self):
         flat_board = []

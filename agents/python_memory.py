@@ -14,8 +14,26 @@ from DeepRLA.agents.policy_gradient_agents.PPO import PPO as DeepRLAPPO
 from utils.agent_config import AgentConfig, policy_gradient_agent_params
 
 class PPO(DeepRLAPPO):
+    """
+        This class overrides some methods in the Deep RLA agent
+        in order to fix some bugs related to compatibility
+        with newer versions of gym
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        # TODO: DeepRLAPPO does not support mps
+        # if not config.use_GPU:
+        #     return
+        # if torch.cuda.is_available():
+        #     self.device = 'cuda:0'
+        # if torch.backends.mps.is_available():
+        #     self.device = 'mps'
+
     def get_state_size(self):
         """Gets the state_size for the gym env into the correct shape for a neural network"""
+        # TODO: make custom superclass for this project's environments with
+        #       get_state_size method
         return self.environment.state_size
     
     def get_trials(self):
