@@ -3,16 +3,17 @@
 .DS_Store
 
 # python virtual env folder
-/env
+/env/
 
 # documentation
-/images
+/images/
 
 # game data to run in pyboy
-/ROMS
+/ROMS/
 
 # training logs (loss, debug info)
 Training.log
+/wandb/
 
 # model checkpoint
 PythonMemory.pt

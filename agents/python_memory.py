@@ -1,10 +1,10 @@
 from pathlib import Path
+import pickle
 import sys
 import time
 from typing import Literal
 from gym.wrappers.record_video import RecordVideo
 import torch
-import numpy as np
 import random
 from random import randint
 import wandb
@@ -40,7 +40,7 @@ class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
         while not done:
             action: Literal[0, 1, 2] = self.pick_action(state, epsilon_exploration)
             direction: Literal["left", "right", "none"] = self.environment._action_to_direction[action]
-            next_state, reward, done, _, _info = self.environment.step(direction)
+            next_state, reward, done, _info = self.environment.step(direction)
             if self.hyperparameters["clip_rewards"]: reward = max(min(reward, 1.0), -1.0)
             episode_states.append(state)
             episode_actions.append(action)
@@ -97,6 +97,29 @@ class PPO(DeepRLAPPO):
     def get_trials(self):
         """Gets the number of trials to average a score over"""
         return 100
+
+class RecordVideoSerializable(RecordVideo):
+    def __init__(
+        self,
+        env,
+        video_folder: str,
+        episode_trigger: int | None = None,
+        step_trigger: int | None = None,
+        video_length: int = 0,
+        name_prefix: str = "rl-video",
+    ):
+        super().__init__(env=env, video_folder=video_folder, video_length=video_length, name_prefix=name_prefix)
+        self.episode_trigger = episode_trigger
+        self.step_trigger = step_trigger
+
+    def _video_enabled(self):
+        if self.step_trigger:
+            return self.step_id % self.step_trigger == 0
+        elif self.episode_trigger:
+            return self.episode_id % self.episode_trigger == 0
+        else:
+            raise Exception(f"must provide either step trigger or episode trigger")
+
 
 class Trainer:
     def __init__(self, agent: PPO, config: AgentConfig) -> None:
@@ -174,25 +197,41 @@ class Trainer:
             wandb.finish()
 
 if __name__ == "__main__":
-    torch.multiprocessing.set_start_method('spawn')
-    env = PythonMemoryEnv(False)
-
-    video_log_freq = 10
-    run_name = "initial"
-    env = RecordVideo(
+    # torch.multiprocessing.set_start_method('spawn')
+    # torch.multiprocessing.set_start_method('fork')
+    env = PythonMemoryEnv(render_mode="rgb_array")
+    
+    env = RecordVideoSerializable(
         env, 
-        f"videos/{run_name}",
-        episode_trigger = lambda x : x % video_log_freq == 0
+        f"videos/test",
+        episode_trigger = 10
     )
 
-    config = AgentConfig(
-        seed=1,
-        environment=env,
-        num_episodes_to_run=100,
-        # num_episodes_to_run=1,
-        hyperparameters=policy_gradient_agent_params,
-        save_model_path="./PythonMemory.pt",
-    )
-    agent = PPO(config)
-    trainer = Trainer(agent, config)
-    trainer.train(print_result=True, save_result=True, use_wandb=False)
+    env.step("left")
+
+
+    class MyPickler(pickle._Pickler):
+        def save(self, obj):
+            print(f"{obj}, {type(obj)}")
+            pickle._Pickler.save(self, obj)
+    pickler = MyPickler(open('./test.txt', "wb")).save(env)
+
+    # video_log_freq = 10
+    # run_name = "initial"
+    # env = RecordVideo(
+    #     env, 
+    #     f"videos/{run_name}",
+    #     episode_trigger = lambda x : x % video_log_freq == 0
+    # )
+
+    # config = AgentConfig(
+    #     seed=1,
+    #     environment=env,
+    #     num_episodes_to_run=100,
+    #     # num_episodes_to_run=1,
+    #     hyperparameters=policy_gradient_agent_params,
+    #     save_model_path="./PythonMemory.pt",
+    # )
+    # agent = PPO(config)
+    # trainer = Trainer(agent, config)
+    # trainer.train(print_result=True, save_result=True, use_wandb=True)

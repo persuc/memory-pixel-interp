@@ -24,21 +24,10 @@ import numpy
 import gym
 from gym import spaces
 from gym.envs.registration import EnvSpec
-from typing import Literal, Mapping
+from typing import Any, Literal, Mapping
 
 # variables------------------------------------
 bx, by = 50, 150  # board position
-
-# Creates a board of rectangles----------------
-def new_board(width: int, height: int):
-    # TODO: the board is laid out height x width in memory
-    # but displayed as width x height in game
-    board = []
-    for x in range(width):
-        board.append([])
-        for _ in range(height):
-            board[x].append(1)
-    return board
 
 
 # Classes defined------------------------------
@@ -68,8 +57,8 @@ class Ball:  # class for ball vars
         self.yPos = (self.speed / tSlope) * self.yPos
         self.adjusted = True
 
-    def reset(self, rng: numpy.random.Generator):
-        self.x = 53 + 480 * rng.random()
+    def reset(self, rand: float):
+        self.x = 53 + 480 * rand
         self.y = 300
         self.xPos = 1
         self.yPos = 1
@@ -113,25 +102,50 @@ def write(x, y, color, msg, font, screen):  # prints onto the screen in selected
     msgRectobj.topleft = (x, y)
     screen.blit(msgSurfaceObj, msgRectobj)
 
+def do_render(screen: pygame.surface.Surface, colors, row_colors, board, ball, paddle, wall1, wall2, wall3, score=None, fontObj=None):
+    screen.fill(colors["black"])
+    pygame.draw.rect(screen, colors["grey"], wall1)
+    pygame.draw.rect(screen, colors["grey"], wall2)
+    pygame.draw.rect(screen, colors["grey"], wall3)
+    pygame.draw.rect(
+        screen,
+        colors["red"],
+        (ball.x - 3, ball.y - 3, 6, 6),
+    )
+    print_board(board, row_colors, screen)
+    print_paddle(paddle, screen, colors["red"])
+    if fontObj is not None:
+        write(
+            20, 20, colors["grey"], str(score), fontObj, screen
+        )
+    temp = 0
+    for life in range(ball.remaining):
+        if life != 0:
+            pygame.draw.rect(
+                screen, colors["red"], (600, 400 - temp, 10, 10)
+            )
+            temp += 15
 
 class Runner:
     render_mode: Literal["human", "rgb_array", None]
     board_width = 18
     board_height = 6
-    rng: numpy.random.Generator
+    screen_width = 640
+    screen_height = 480
+    ball_start_x: numpy.ndarray[Any, numpy.dtypes.Float64DType]
+    lives = 3
 
     def __init__(self, render_mode: Literal["human", "rgb_array", None]):
         self.render_mode = render_mode
-        self.rng = numpy.random.default_rng(seed=None)
+        self.ball_start_x = numpy.random.rand(self.lives)
 
         pygame.init()
         if self.render_mode is not None:
-            self.fontObj = pygame.font.Font("freesansbold.ttf", 24)
             if self.render_mode == "human":
+                self.fontObj = pygame.font.Font("freesansbold.ttf", 24)
                 self.fpsClock = pygame.time.Clock()
                 pygame.display.set_caption("Breakout")  # set title bar
-
-            self.screen = pygame.display.set_mode((640, 480))
+                self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
 
             self.colors = {
                 # generic colors-------------------------------
@@ -167,17 +181,22 @@ class Runner:
         self.reset()
 
     def seed(self, seed: int) -> None:
-        self.rng = numpy.random.default_rng(seed=seed)
+        numpy.random.seed(seed)
+        self.ball_start_x = numpy.random.rand(self.lives)
         self.reset()
 
     def reset(self):
-        self.board = new_board(self.board_width, self.board_height)
+        # TODO: the board is laid out height x width in memory
+        # but displayed as width x height in game
+        self.board = []
+        for x in range(self.board_width):
+            self.board.append([])
+            for _ in range(self.board_height):
+                self.board[x].append(1)
         self.score = 0
         self.paddle = Paddle()
         self.ball = Ball()
-        self.ball.reset(self.rng)
-        if self.render_mode is not None:
-            self.screen.fill(self.colors["black"])
+        self.ball.reset(self.ball_start_x[self.ball.remaining - 1])
         self.steps = 0
 
     def step(self, direction: Literal["left", "right", "none"]):
@@ -194,34 +213,12 @@ class Runner:
         if not self.ball.alive:
             colO = False
             colR = False
-            self.ball.reset(self.rng)
+            self.ball.reset(self.ball_start_x[self.ball.remaining - 1])
 
-    def do_render(self):
-        self.screen.fill(self.colors["black"])
-        pygame.draw.rect(self.screen, self.colors["grey"], self.wall1)
-        pygame.draw.rect(self.screen, self.colors["grey"], self.wall2)
-        pygame.draw.rect(self.screen, self.colors["grey"], self.wall3)
-        pygame.draw.rect(
-            self.screen,
-            self.colors["red"],
-            (self.ball.x - 3, self.ball.y - 3, 6, 6),
-        )
-        print_board(self.board, self.row_colors, self.screen)
-        print_paddle(self.paddle, self.screen, self.colors["red"])
-        write(
-            20, 20, self.colors["grey"], str(self.score), self.fontObj, self.screen
-        )
-        temp = 0
-        for life in range(self.ball.remaining):
-            if life != 0:
-                pygame.draw.rect(
-                    self.screen, self.colors["red"], (600, 400 - temp, 10, 10)
-                )
-                temp += 15
 
     def game(self, colO, colR):
-        if self.render_mode is not None:
-            self.do_render()
+        if self.render_mode == "human":
+            do_render(self.screen, self.colors, self.row_colors, self.board, self.ball, self.paddle, self.wall1, self.wall2, self.wall3, self.score, self.fontObj)
 
         # check all the collisions-------------------------
         if self.ball.adjusted == False:
@@ -323,7 +320,7 @@ class PythonMemoryEnv(gym.Env):
     state_size: int
     render_mode: Literal["human", "rgb_array", None]
 
-    def __init__(self, render: bool, render_mode=None):
+    def __init__(self, render_mode=None):
         assert render_mode is None or render_mode in self.metadata["render_modes"], f"render_mode must be None, \"human\", or \"rgb_array\""
         self.render_mode = render_mode
         self.runner = Runner(render_mode=self.render_mode)
@@ -334,7 +331,7 @@ class PythonMemoryEnv(gym.Env):
 
         max_reward = self.runner.board_width * 2 * 1 + self.runner.board_width * 2 * 4 + self.runner.board_width * 2 * 7
 
-        self.spec = EnvSpec(id=self.env, entry_point='environments.python_breakout:PythonMemoryEnv', reward_threshold=max_reward, max_episode_steps=300)
+        self.spec = EnvSpec(id_requested=self.env, entry_point='environments.python_breakout:PythonMemoryEnv', reward_threshold=max_reward, max_episode_steps=300)
         
         self.observation_space = spaces.Discrete(self.state_size)
         
@@ -369,21 +366,25 @@ class PythonMemoryEnv(gym.Env):
             self.current_score = self.runner.score
         else:
             reward = 0
-        # obs, reward, done, ?, info
+        # obs, reward, done, info
         return (
             self._get_obs(),
             reward,
             self.runner.ball.remaining > 0,
-            False,
             self._get_info(),
         )
 
-    def render(self):
-        if self.render_mode == "rgb_array":
-            return numpy.transpose(
-                numpy.array(pygame.surfarray.pixels3d(self.runner.screen)), axes=(1, 0, 2)
-            )
-
+    def render(self, mode: Literal["human", "rgb_array", None]):
+        if mode != "rgb_array":
+            raise Exception(f"Requested render but environment was initialized with render_mode={self.render_mode}")
+        if self.render_mode != "rgb_array":
+            raise Exception(f"Requested rgb_array but environment was initialized with render_mode={self.render_mode}")
+        screen = pygame.Surface((self.runner.screen_width, self.runner.screen_height))
+        do_render(screen, self.runner.colors, self.runner.row_colors, self.runner.board, self.runner.ball, self.runner.paddle, self.runner.wall1, self.runner.wall2, self.runner.wall3)
+        screen = pygame.transform.flip(screen, False, True)
+        return numpy.transpose(
+            numpy.array(pygame.surfarray.pixels3d(screen)).copy(), axes=(1, 0, 2)
+        )
 
 
 # -----------------------------------------------------
