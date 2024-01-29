@@ -365,7 +365,7 @@ class PythonMemoryEnv(gym.Env):
 # -----------------------------------------------------
 if __name__ == "__main__":
     runner = Runner()
-    while True:
+    while runner.ball.remaining > 0:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
