@@ -73,7 +73,8 @@ class Trainer:
         """Runs a set of games for a given agent, saving the results in self.results"""
         print("AGENT NAME: {}".format(self.agent.agent_name))
         self.environment_name = self.agent.environment_title
-        wandb.init()
+        if use_wandb:
+            wandb.init()
         itr_per_round = self.agent.hyperparameters["learning_iterations_per_round"]
         self.loss_history = []
         print(self.agent.hyperparameters)
@@ -111,8 +112,8 @@ class Trainer:
         if self.agent_config.visualise_individual_results:
             # TODO
             pass
-            
-        wandb.finish()
+        if use_wandb:
+            wandb.finish()
 
 env = PythonMemoryEnv(False)
 
