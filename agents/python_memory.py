@@ -77,7 +77,7 @@ class PPO(DeepRLAPPO):
         super().__init__(config)
 
         self.experience_generator = Parallel_Experience_Generator(self.environment, self.policy_new, self.config.seed,
-                                                                  self.hyperparameters, self.action_size, use_GPU=True)
+                                                                  self.hyperparameters, self.action_size, use_GPU=config.use_GPU)
 
         # TODO: DeepRLAPPO does not support mps
         # if not config.use_GPU:
