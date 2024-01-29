@@ -1,7 +1,18 @@
-/env
+# cached files
 **/__pycache__/
 .DS_Store
 
+# python virtual env folder
+/env
+
+# documentation
 /images
+
+# game data to run in pyboy
 /ROMS
+
+# training logs (loss, debug info)
 Training.log
+
+# model checkpoint
+PythonMemory.pt
