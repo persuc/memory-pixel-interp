@@ -24,7 +24,7 @@ import numpy
 import gym
 from gym import spaces
 from gym.envs.registration import EnvSpec
-from typing import Literal
+from typing import Literal, Mapping
 
 # variables------------------------------------
 bx, by = 50, 150  # board position
@@ -292,7 +292,7 @@ class Runner:
             pygame.display.update()
             self.fpsClock.tick(30)
 
-    def get_memory(self):
+    def get_memory(self) -> list[int | float]:
         flat_board = []
         for row in self.board:
             flat_board.extend(row)
@@ -336,7 +336,7 @@ class PythonMemoryEnv(gym.Env):
         # We have 2 actions, corresponding to right, left, none
         self.action_space = spaces.Discrete(3)
 
-        self._action_to_direction = {
+        self._action_to_direction: Mapping[Literal[0, 1, 2], Literal["left", "right", "none"]] = {
             0: "right",
             1: "left",
             2: "none"
