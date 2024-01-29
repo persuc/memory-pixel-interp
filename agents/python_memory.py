@@ -4,7 +4,7 @@ import time
 import torch
 import wandb
 
-sys.path.append(str(Path(sys.executable).parent.parent.parent))
+sys.path.append(str(Path.cwd()))
 
 import main
 
