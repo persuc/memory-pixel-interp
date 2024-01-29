@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 import time
 from typing import Literal
+from gym.wrappers.record_video import RecordVideo
 import torch
 import numpy as np
 import random
@@ -131,7 +132,7 @@ class Trainer:
         print("AGENT NAME: {}".format(self.agent.agent_name))
         self.environment_name = self.agent.environment_title
         if use_wandb:
-            wandb.init()
+            wandb.init(monitor_gym=self.agent_config.capture_video)
         itr_per_round = self.agent.hyperparameters["learning_iterations_per_round"]
         self.loss_history = []
         print(self.agent.hyperparameters)
@@ -175,6 +176,14 @@ class Trainer:
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method('spawn')
     env = PythonMemoryEnv(False)
+
+    video_log_freq = 10
+    run_name = "initial"
+    env = RecordVideo(
+        env, 
+        f"videos/{run_name}",
+        episode_trigger = lambda x : x % video_log_freq == 0
+    )
 
     config = AgentConfig(
         seed=1,

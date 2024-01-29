@@ -115,20 +115,21 @@ def write(x, y, color, msg, font, screen):  # prints onto the screen in selected
 
 
 class Runner:
-    render: bool
+    render_mode: Literal["human", "rgb_array", None]
     board_width = 18
     board_height = 6
     rng: numpy.random.Generator
 
-    def __init__(self, render=True):
-        self.render = render
+    def __init__(self, render_mode: Literal["human", "rgb_array", None]):
+        self.render_mode = render_mode
         self.rng = numpy.random.default_rng(seed=None)
 
         pygame.init()
-        if self.render:
+        if self.render_mode is not None:
             self.fontObj = pygame.font.Font("freesansbold.ttf", 24)
-            self.fpsClock = pygame.time.Clock()
-            pygame.display.set_caption("Breakout")  # set title bar
+            if self.render_mode == "human":
+                self.fpsClock = pygame.time.Clock()
+                pygame.display.set_caption("Breakout")  # set title bar
 
             self.screen = pygame.display.set_mode((640, 480))
 
@@ -175,7 +176,7 @@ class Runner:
         self.paddle = Paddle()
         self.ball = Ball()
         self.ball.reset(self.rng)
-        if self.render:
+        if self.render_mode is not None:
             self.screen.fill(self.colors["black"])
         self.steps = 0
 
@@ -195,29 +196,32 @@ class Runner:
             colR = False
             self.ball.reset(self.rng)
 
+    def do_render(self):
+        self.screen.fill(self.colors["black"])
+        pygame.draw.rect(self.screen, self.colors["grey"], self.wall1)
+        pygame.draw.rect(self.screen, self.colors["grey"], self.wall2)
+        pygame.draw.rect(self.screen, self.colors["grey"], self.wall3)
+        pygame.draw.rect(
+            self.screen,
+            self.colors["red"],
+            (self.ball.x - 3, self.ball.y - 3, 6, 6),
+        )
+        print_board(self.board, self.row_colors, self.screen)
+        print_paddle(self.paddle, self.screen, self.colors["red"])
+        write(
+            20, 20, self.colors["grey"], str(self.score), self.fontObj, self.screen
+        )
+        temp = 0
+        for life in range(self.ball.remaining):
+            if life != 0:
+                pygame.draw.rect(
+                    self.screen, self.colors["red"], (600, 400 - temp, 10, 10)
+                )
+                temp += 15
+
     def game(self, colO, colR):
-        if self.render:
-            self.screen.fill(self.colors["black"])
-            pygame.draw.rect(self.screen, self.colors["grey"], self.wall1)
-            pygame.draw.rect(self.screen, self.colors["grey"], self.wall2)
-            pygame.draw.rect(self.screen, self.colors["grey"], self.wall3)
-            pygame.draw.rect(
-                self.screen,
-                self.colors["red"],
-                (self.ball.x - 3, self.ball.y - 3, 6, 6),
-            )
-            print_board(self.board, self.row_colors, self.screen)
-            print_paddle(self.paddle, self.screen, self.colors["red"])
-            write(
-                20, 20, self.colors["grey"], str(self.score), self.fontObj, self.screen
-            )
-            temp = 0
-            for life in range(self.ball.remaining):
-                if life != 0:
-                    pygame.draw.rect(
-                        self.screen, self.colors["red"], (600, 400 - temp, 10, 10)
-                    )
-                    temp += 15
+        if self.render_mode is not None:
+            self.do_render()
 
         # check all the collisions-------------------------
         if self.ball.adjusted == False:
@@ -288,9 +292,10 @@ class Runner:
             if self.paddle.x >= 79:
                 self.paddle.x -= 8
 
-        if self.render:
-            pygame.display.update()
-            self.fpsClock.tick(30)
+        if self.render_mode is not None:
+            if self.render_mode == "human":
+                pygame.display.update()
+                self.fpsClock.tick(30)
 
     def get_memory(self) -> list[int | float]:
         flat_board = []
@@ -316,13 +321,13 @@ class PythonMemoryEnv(gym.Env):
     env = "arena-3/PythonBreakoutMemory-v0"
     spec: EnvSpec
     state_size: int
+    render_mode: Literal["human", "rgb_array", None]
 
     def __init__(self, render: bool, render_mode=None):
-        self.runner = Runner(render)
-        self.current_score = 0
-
-        assert render_mode is None or render_mode in self.metadata["render_modes"], f"render_mode must be \"None\", \"human\", or \"rgb_array\""
+        assert render_mode is None or render_mode in self.metadata["render_modes"], f"render_mode must be None, \"human\", or \"rgb_array\""
         self.render_mode = render_mode
+        self.runner = Runner(render_mode=self.render_mode)
+        self.current_score = 0
 
         board_size = self.runner.board_width * self.runner.board_height
         self.state_size = board_size + 11
@@ -357,6 +362,7 @@ class PythonMemoryEnv(gym.Env):
         return self._get_obs(), self._get_info()
 
     def step(self, action: Literal["left", "right", "none"]):
+        self.runner.render_mode = self.render_mode
         if self.runner.ball.remaining:
             self.runner.step(action)
             reward = self.runner.score - self.current_score
@@ -372,11 +378,17 @@ class PythonMemoryEnv(gym.Env):
             self._get_info(),
         )
 
+    def render(self):
+        if self.render_mode == "rgb_array":
+            return numpy.transpose(
+                numpy.array(pygame.surfarray.pixels3d(self.runner.screen)), axes=(1, 0, 2)
+            )
+
 
 
 # -----------------------------------------------------
 if __name__ == "__main__":
-    runner = Runner()
+    runner = Runner(render_mode="human")
     runner.seed(0)
     while runner.ball.remaining > 0:
         for event in pygame.event.get():
