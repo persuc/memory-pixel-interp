@@ -206,32 +206,15 @@ if __name__ == "__main__":
         f"videos/test",
         episode_trigger = 10
     )
-
-    env.step("left")
-
-
-    class MyPickler(pickle._Pickler):
-        def save(self, obj):
-            print(f"{obj}, {type(obj)}")
-            pickle._Pickler.save(self, obj)
-    pickler = MyPickler(open('./test.txt', "wb")).save(env)
-
-    # video_log_freq = 10
-    # run_name = "initial"
-    # env = RecordVideo(
-    #     env, 
-    #     f"videos/{run_name}",
-    #     episode_trigger = lambda x : x % video_log_freq == 0
-    # )
-
-    # config = AgentConfig(
-    #     seed=1,
-    #     environment=env,
-    #     num_episodes_to_run=100,
-    #     # num_episodes_to_run=1,
-    #     hyperparameters=policy_gradient_agent_params,
-    #     save_model_path="./PythonMemory.pt",
-    # )
-    # agent = PPO(config)
-    # trainer = Trainer(agent, config)
-    # trainer.train(print_result=True, save_result=True, use_wandb=True)
+    
+    config = AgentConfig(
+        seed=1,
+        environment=env,
+        num_episodes_to_run=100,
+        # num_episodes_to_run=1,
+        hyperparameters=policy_gradient_agent_params,
+        save_model_path="./PythonMemory.pt",
+    )
+    agent = PPO(config)
+    trainer = Trainer(agent, config)
+    trainer.train(print_result=True, save_result=True, use_wandb=True)
