@@ -11,7 +11,29 @@ import main
 from environments.python_breakout import PythonMemoryEnv
 from DeepRLA.utilities.Utility_Functions import normalise_rewards
 from DeepRLA.agents.policy_gradient_agents.PPO import PPO as DeepRLAPPO
+from DeepRLA.utilities.Parallel_Experience_Generator import Parallel_Experience_Generator as DeepRLA_Parallel_Experience_Generator
 from utils.agent_config import AgentConfig, policy_gradient_agent_params
+
+
+class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
+    environment: PythonMemoryEnv
+
+    def play_1_episode(self, epsilon_exploration):
+        """Plays 1 episode using the fixed policy and returns the data"""
+        state, _info = self.reset_game()
+        done = False
+        episode_states = []
+        episode_actions = []
+        episode_rewards = []
+        while not done:
+            action = self.pick_action(self.policy, state, epsilon_exploration)
+            next_state, reward, done, _, _info = self.environment.step(action)
+            if self.hyperparameters["clip_rewards"]: reward = max(min(reward, 1.0), -1.0)
+            episode_states.append(state)
+            episode_actions.append(action)
+            episode_rewards.append(reward)
+            state = next_state
+        return episode_states, episode_actions, episode_rewards
 
 class PPO(DeepRLAPPO):
     """
@@ -22,6 +44,10 @@ class PPO(DeepRLAPPO):
 
     def __init__(self, config):
         super().__init__(config)
+
+        self.experience_generator = Parallel_Experience_Generator(self.environment, self.policy_new, self.config.seed,
+                                                                  self.hyperparameters, self.action_size)
+
         # TODO: DeepRLAPPO does not support mps
         # if not config.use_GPU:
         #     return
