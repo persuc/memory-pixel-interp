@@ -28,6 +28,15 @@ class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
     environment: PythonMemoryEnv
     policy: NN
 
+    def play_n_episodes(self, n, exploration_epsilon=None):
+        """Plays n episodes in parallel using the fixed policy and returns the data"""
+        self.exploration_epsilon = exploration_epsilon
+        results = [self(n) for _ in range(n)]
+        states_for_all_episodes = [episode[0] for episode in results]
+        actions_for_all_episodes = [episode[1] for episode in results]
+        rewards_for_all_episodes = [episode[2] for episode in results]
+        return states_for_all_episodes, actions_for_all_episodes, rewards_for_all_episodes
+
     def play_1_episode(self, epsilon_exploration: float):
         """Plays 1 episode using the fixed policy and returns the data"""
         state: list[int | float]
@@ -111,6 +120,7 @@ class RecordVideoSerializable(RecordVideo):
         super().__init__(env=env, video_folder=video_folder, video_length=video_length, name_prefix=name_prefix)
         self.episode_trigger = episode_trigger
         self.step_trigger = step_trigger
+        self._action_to_direction = env._action_to_direction
 
     def _video_enabled(self):
         if self.step_trigger:
@@ -211,7 +221,6 @@ if __name__ == "__main__":
         seed=1,
         environment=env,
         num_episodes_to_run=100,
-        # num_episodes_to_run=1,
         hyperparameters=policy_gradient_agent_params,
         save_model_path="./PythonMemory.pt",
     )

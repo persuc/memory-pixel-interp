@@ -381,7 +381,6 @@ class PythonMemoryEnv(gym.Env):
             raise Exception(f"Requested rgb_array but environment was initialized with render_mode={self.render_mode}")
         screen = pygame.Surface((self.runner.screen_width, self.runner.screen_height))
         do_render(screen, self.runner.colors, self.runner.row_colors, self.runner.board, self.runner.ball, self.runner.paddle, self.runner.wall1, self.runner.wall2, self.runner.wall3)
-        screen = pygame.transform.flip(screen, False, True)
         return numpy.transpose(
             numpy.array(pygame.surfarray.pixels3d(screen)).copy(), axes=(1, 0, 2)
         )
