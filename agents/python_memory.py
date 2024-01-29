@@ -9,6 +9,7 @@ from random import randint
 import wandb
 from contextlib import closing
 from torch.multiprocessing import Pool
+from nn_builder.pytorch.NN import NN
 
 sys.path.append(str(Path.cwd()))
 
@@ -24,6 +25,7 @@ from utils.agent_config import AgentConfig, policy_gradient_agent_params
 
 class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
     environment: PythonMemoryEnv
+    policy: NN
 
     def play_1_episode(self, epsilon_exploration: float):
         """Plays 1 episode using the fixed policy and returns the data"""
@@ -35,7 +37,7 @@ class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
         episode_actions = []
         episode_rewards = []
         while not done:
-            action: Literal[0, 1, 2] = self.pick_action(self.policy, state, epsilon_exploration)
+            action: Literal[0, 1, 2] = self.pick_action(state, epsilon_exploration)
             direction: Literal["left", "right", "none"] = self.environment._action_to_direction[action]
             next_state, reward, done, _, _info = self.environment.step(direction)
             if self.hyperparameters["clip_rewards"]: reward = max(min(reward, 1.0), -1.0)
@@ -43,9 +45,10 @@ class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
             episode_actions.append(action)
             episode_rewards.append(reward)
             state = next_state
+            # print(f"{state=}")
         return episode_states, episode_actions, episode_rewards
     
-    def pick_action(self, policy, state: list[int | float], epsilon_exploration: float) -> Literal[0, 1, 2]:
+    def pick_action(self, state: list[int | float], epsilon_exploration: float) -> Literal[0, 1, 2]:
         """Picks an action using the policy"""
         if self.action_types == "DISCRETE":
             if random.random() <= epsilon_exploration:
@@ -53,7 +56,7 @@ class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
                 return action
         device = 'cuda:0' if self.use_GPU else 'cpu'
         state = torch.tensor(state).float().unsqueeze(0).to(device)
-        actor_output = policy.forward(state)
+        actor_output = self.policy.forward(state)
         if self.action_choice_output_columns is not None:
             actor_output = actor_output[:, self.action_choice_output_columns]
         action_distribution = create_actor_distribution(self.action_types, actor_output, self.action_size)
@@ -62,17 +65,6 @@ class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
         if self.action_types == "CONTINUOUS": action += torch.Tensor(self.noise.sample())
         else: action = action.item()
         return action
-
-    def play_n_episodes(self, n, exploration_epsilon=None):
-        """Plays n episodes in parallel using the fixed policy and returns the data"""
-        self.exploration_epsilon = exploration_epsilon
-        with closing(Pool(processes=n)) as pool:
-            results = pool.map(self, range(n))
-            pool.terminate()
-        states_for_all_episodes = [episode[0] for episode in results]
-        actions_for_all_episodes = [episode[1] for episode in results]
-        rewards_for_all_episodes = [episode[2] for episode in results]
-        return states_for_all_episodes, actions_for_all_episodes, rewards_for_all_episodes
 
 class PPO(DeepRLAPPO):
     """
@@ -85,7 +77,7 @@ class PPO(DeepRLAPPO):
         super().__init__(config)
 
         self.experience_generator = Parallel_Experience_Generator(self.environment, self.policy_new, self.config.seed,
-                                                                  self.hyperparameters, self.action_size)
+                                                                  self.hyperparameters, self.action_size, use_GPU=True)
 
         # TODO: DeepRLAPPO does not support mps
         # if not config.use_GPU:
@@ -187,10 +179,10 @@ if __name__ == "__main__":
     config = AgentConfig(
         seed=1,
         environment=env,
-        # num_episodes_to_run=100,
-        num_episodes_to_run=1,
+        num_episodes_to_run=100,
+        # num_episodes_to_run=1,
         hyperparameters=policy_gradient_agent_params,
-        save_model_path="~/PythonMemory.pt",
+        save_model_path="./PythonMemory.pt",
     )
     agent = PPO(config)
     trainer = Trainer(agent, config)
