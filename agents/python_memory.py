@@ -1,8 +1,14 @@
 from pathlib import Path
 import sys
 import time
+from typing import Literal
 import torch
+import numpy as np
+import random
+from random import randint
 import wandb
+from contextlib import closing
+from torch.multiprocessing import Pool
 
 sys.path.append(str(Path.cwd()))
 
@@ -12,28 +18,61 @@ from environments.python_breakout import PythonMemoryEnv
 from DeepRLA.utilities.Utility_Functions import normalise_rewards
 from DeepRLA.agents.policy_gradient_agents.PPO import PPO as DeepRLAPPO
 from DeepRLA.utilities.Parallel_Experience_Generator import Parallel_Experience_Generator as DeepRLA_Parallel_Experience_Generator
+from DeepRLA.utilities.Utility_Functions import create_actor_distribution
 from utils.agent_config import AgentConfig, policy_gradient_agent_params
 
 
 class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
     environment: PythonMemoryEnv
 
-    def play_1_episode(self, epsilon_exploration):
+    def play_1_episode(self, epsilon_exploration: float):
         """Plays 1 episode using the fixed policy and returns the data"""
+        state: list[int | float]
         state, _info = self.reset_game()
+        # 
         done = False
         episode_states = []
         episode_actions = []
         episode_rewards = []
         while not done:
-            action = self.pick_action(self.policy, state, epsilon_exploration)
-            next_state, reward, done, _, _info = self.environment.step(action)
+            action: Literal[0, 1, 2] = self.pick_action(self.policy, state, epsilon_exploration)
+            direction: Literal["left", "right", "none"] = self.environment._action_to_direction[action]
+            next_state, reward, done, _, _info = self.environment.step(direction)
             if self.hyperparameters["clip_rewards"]: reward = max(min(reward, 1.0), -1.0)
             episode_states.append(state)
             episode_actions.append(action)
             episode_rewards.append(reward)
             state = next_state
         return episode_states, episode_actions, episode_rewards
+    
+    def pick_action(self, policy, state: list[int | float], epsilon_exploration: float) -> Literal[0, 1, 2]:
+        """Picks an action using the policy"""
+        if self.action_types == "DISCRETE":
+            if random.random() <= epsilon_exploration:
+                action = random.randint(0, self.action_size - 1)
+                return action
+        device = 'cuda:0' if self.use_GPU else 'cpu'
+        state = torch.tensor(state).float().unsqueeze(0).to(device)
+        actor_output = policy.forward(state)
+        if self.action_choice_output_columns is not None:
+            actor_output = actor_output[:, self.action_choice_output_columns]
+        action_distribution = create_actor_distribution(self.action_types, actor_output, self.action_size)
+        action = action_distribution.sample().cpu()
+
+        if self.action_types == "CONTINUOUS": action += torch.Tensor(self.noise.sample())
+        else: action = action.item()
+        return action
+
+    def play_n_episodes(self, n, exploration_epsilon=None):
+        """Plays n episodes in parallel using the fixed policy and returns the data"""
+        self.exploration_epsilon = exploration_epsilon
+        with closing(Pool(processes=n)) as pool:
+            results = pool.map(self, range(n))
+            pool.terminate()
+        states_for_all_episodes = [episode[0] for episode in results]
+        actions_for_all_episodes = [episode[1] for episode in results]
+        rewards_for_all_episodes = [episode[2] for episode in results]
+        return states_for_all_episodes, actions_for_all_episodes, rewards_for_all_episodes
 
 class PPO(DeepRLAPPO):
     """
@@ -75,7 +114,7 @@ class Trainer:
     def step_agent(self):
         """Runs a step for the PPO agent"""
         exploration_epsilon =  self.agent.exploration_strategy.get_updated_epsilon_exploration({"episode_number": self.agent.episode_number})
-        self.many_episode_states, self.many_episode_actions, self.many_episode_rewards = self.agent.experience_generator.play_n_episodes(
+        self.agent.many_episode_states, self.agent.many_episode_actions, self.agent.many_episode_rewards = self.agent.experience_generator.play_n_episodes(
             self.agent.hyperparameters["episodes_per_learning_round"], exploration_epsilon)
         self.agent.episode_number += self.agent.hyperparameters["episodes_per_learning_round"]
         self.policy_learn()
