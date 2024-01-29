@@ -115,16 +115,18 @@ class Trainer:
         if use_wandb:
             wandb.finish()
 
-env = PythonMemoryEnv(False)
+if __name__ == "__main__":
+    torch.multiprocessing.set_start_method('spawn')
+    env = PythonMemoryEnv(False)
 
-config = AgentConfig(
-    seed=1,
-    environment=env,
-    # num_episodes_to_run=100,
-    num_episodes_to_run=1,
-    hyperparameters=policy_gradient_agent_params,
-    save_model_path="~/PythonMemory.pt",
-)
-agent = PPO(config)
-trainer = Trainer(agent, config)
-# trainer.train(print_result=True, save_result=True, use_wandb=False)
+    config = AgentConfig(
+        seed=1,
+        environment=env,
+        # num_episodes_to_run=100,
+        num_episodes_to_run=1,
+        hyperparameters=policy_gradient_agent_params,
+        save_model_path="~/PythonMemory.pt",
+    )
+    agent = PPO(config)
+    trainer = Trainer(agent, config)
+    trainer.train(print_result=True, save_result=True, use_wandb=False)

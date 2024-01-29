@@ -124,8 +124,8 @@ class Runner:
         self.render = render
         self.rng = numpy.random.default_rng(seed=None)
 
+        pygame.init()
         if self.render:
-            pygame.init()
             self.fontObj = pygame.font.Font("freesansbold.ttf", 24)
             self.fpsClock = pygame.time.Clock()
             pygame.display.set_caption("Breakout")  # set title bar
@@ -158,10 +158,10 @@ class Runner:
                 self.colors["r6"],
             ]
 
-            # world objects
-            self.wall1 = pygame.Rect(20, 100, 30, 380)
-            self.wall2 = pygame.Rect(590, 100, 30, 380)
-            self.wall3 = pygame.Rect(20, 80, 600, 30)
+        # world objects
+        self.wall1 = pygame.Rect(20, 100, 30, 380)
+        self.wall2 = pygame.Rect(590, 100, 30, 380)
+        self.wall3 = pygame.Rect(20, 80, 600, 30)
 
         self.reset()
 
@@ -188,8 +188,7 @@ class Runner:
         self.steps += 1
 
         if self.ball.remaining == 0:
-            if self.render:
-                pygame.quit()
+            pygame.quit()
 
         if not self.ball.alive:
             colO = False
@@ -368,7 +367,7 @@ class PythonMemoryEnv(gym.Env):
         return (
             self._get_obs(),
             reward,
-            runner.ball.remaining > 0,
+            self.runner.ball.remaining > 0,
             False,
             self._get_info(),
         )
