@@ -15,7 +15,8 @@ class AgentConfig(object):
     visualise_individual_results: bool = False
     file_to_save_data_results: str | None = None
     file_to_save_results_graph: str | None = None
-    use_GPU = True  # if true, agent uses "cuda:0" else "cpu"
+    use_GPU: bool = True  # if true, agent uses "cuda:0" else "cpu"
+    capture_video: bool = True,
     overwrite_existing_results_file: bool = False
     save_model_path: str | None = None
     standard_deviation_results: float = 1.0

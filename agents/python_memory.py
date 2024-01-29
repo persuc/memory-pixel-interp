@@ -80,7 +80,7 @@ class PPO(DeepRLAPPO):
         self.experience_generator = Parallel_Experience_Generator(self.environment, self.policy_new, self.config.seed,
                                                                   self.hyperparameters, self.action_size, use_GPU=config.use_GPU)
 
-        # TODO: DeepRLAPPO does not support mps
+        # TODO: DeepRLA PPO does not support mps
         # if not config.use_GPU:
         #     return
         # if torch.cuda.is_available():
