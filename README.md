@@ -12,6 +12,19 @@ Install deps:
 Or make a virtual env:
 `python -m venv env && source ./env/bin/activate && pip install -r requirements.txt`
 
+(VsCode) Install recommended extensions:
+```
+⌘⇧P
+Extensions: Show Recommended Extensions
+☁ Install Workspace Recommended Extensions
+```
+
+(VastAI) Select default python env:
+`python 3.10.13 ('base')`
+
+(VastAI) If you don't like tmux:
+`touch ~/.no_auto_tmux`
+
 ## Summary
 
 Core components of this project:

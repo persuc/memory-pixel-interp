@@ -331,7 +331,7 @@ class PythonMemoryEnv(gym.Env):
 
         max_reward = self.runner.board_width * 2 * 1 + self.runner.board_width * 2 * 4 + self.runner.board_width * 2 * 7
 
-        self.spec = EnvSpec(id_requested=self.env, entry_point='environments.python_breakout:PythonMemoryEnv', reward_threshold=max_reward, max_episode_steps=300)
+        self.spec = EnvSpec(id=self.env, entry_point='environments.python_breakout:PythonMemoryEnv', reward_threshold=max_reward, max_episode_steps=300)
         
         self.observation_space = spaces.Discrete(self.state_size)
         
