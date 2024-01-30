@@ -25,6 +25,13 @@ Extensions: Show Recommended Extensions
 (VastAI) If you don't like tmux:
 `touch ~/.no_auto_tmux`
 
+To get video logging to work you may need to install video codecs:
+<!-- `conda update --force conda`
+`conda update ffmpeg`
+`apt-get install libx264-155` (for Ubuntu 20.04 LTS)
+`apt-get install ffmpeg` -->
+
+
 ## Summary
 
 Core components of this project:

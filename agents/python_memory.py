@@ -1,12 +1,14 @@
 from pathlib import Path
-import pickle
+import subprocess
 import sys
+import os
 import time
 from typing import Literal
+from gym import error, logger
 from gym.wrappers.record_video import RecordVideo
+from gym.wrappers.monitoring.video_recorder import VideoRecorder as GymVideoRecorder, ImageEncoder as GymImageEncoder
 import torch
 import random
-from random import randint
 import wandb
 from contextlib import closing
 from torch.multiprocessing import Pool
@@ -105,7 +107,77 @@ class PPO(DeepRLAPPO):
         """Gets the number of trials to average a score over"""
         return 100
 
+class ImageEncoder(GymImageEncoder):
+    encoder_descriptor: str
+    def __init__(self, output_path, frame_shape, frames_per_sec, output_frames_per_sec, encoder: str = "mpeg4"):
+        self.encoder_descriptor = encoder
+        super().__init__(output_path, frame_shape, frames_per_sec, output_frames_per_sec)
+    
+    def start(self):
+        self.cmdline = (
+            self.backend,
+            "-nostats",
+            "-loglevel",
+            "error",  # suppress warnings
+            "-y",
+            # input
+            "-f",
+            "rawvideo",
+            "-s:v",
+            "{}x{}".format(*self.wh),
+            "-pix_fmt",
+            ("rgb32" if self.includes_alpha else "rgb24"),
+            "-framerate",
+            "%d" % self.frames_per_sec,
+            "-i",
+            "-",  # this used to be /dev/stdin, which is not Windows-friendly
+            # output
+            "-vf",
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            "-vcodec",
+            # "libx264", this is a proprietary format, somewhat difficult to compile
+            self.encoder_descriptor,
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
+            "%d" % self.output_frames_per_sec,
+            self.output_path,
+        )
+
+        logger.debug('Starting %s with "%s"', self.backend, " ".join(self.cmdline))
+        if hasattr(os, "setsid"):  # setsid not present on Windows
+            self.proc = subprocess.Popen(
+                self.cmdline, stdin=subprocess.PIPE, preexec_fn=os.setsid
+            )
+        else:
+            self.proc = subprocess.Popen(self.cmdline, stdin=subprocess.PIPE)
+
+class VideoRecorder(GymVideoRecorder):
+    encoder_descriptor: str
+    def __init__(self, env, path=None, metadata=None, enabled=True, base_path=None, encoder: str = "mpeg4"):
+        super().__init__(env, path=path, metadata=metadata, enabled=enabled, base_path=base_path)
+        self.encoder_descriptor = encoder
+
+
+    def _encode_image_frame(self, frame):
+        if not self.encoder:
+            self.encoder = ImageEncoder(
+                self.path, frame.shape, self.frames_per_sec, self.output_frames_per_sec, self.encoder_descriptor
+            )
+            self.metadata["encoder_version"] = self.encoder.version_info
+
+        try:
+            self.encoder.capture_frame(frame)
+        except error.InvalidFrame as e:
+            logger.warn("Tried to pass invalid video frame, marking as broken: %s", e)
+            self.broken = True
+        else:
+            self.empty = False
+   
 class RecordVideoSerializable(RecordVideo):
+    """
+        encoder: Codec to use for image encoding. Can be any codec supported by ffmpeg
+    """
     def __init__(
         self,
         env,
@@ -114,11 +186,15 @@ class RecordVideoSerializable(RecordVideo):
         step_trigger: int | None = None,
         video_length: int = 0,
         name_prefix: str = "rl-video",
+        encoder: str = "mpeg4"
     ):
         super().__init__(env=env, video_folder=video_folder, video_length=video_length, name_prefix=name_prefix)
         self.episode_trigger = episode_trigger
         self.step_trigger = step_trigger
         self._action_to_direction = env._action_to_direction
+        self.encoder = encoder
+        # self.render_mode: Literal["human", "rgb_array", None] = env.render_mode
+        # self.state_size = env.state_size
 
     def _video_enabled(self):
         if self.step_trigger:
@@ -127,6 +203,25 @@ class RecordVideoSerializable(RecordVideo):
             return self.episode_id % self.episode_trigger == 0
         else:
             raise Exception(f"must provide either step trigger or episode trigger")
+
+    def start_video_recorder(self):
+        self.close_video_recorder()
+
+        video_name = f"{self.name_prefix}-step-{self.step_id}"
+        if self.episode_trigger:
+            video_name = f"{self.name_prefix}-episode-{self.episode_id}"
+
+        base_path = os.path.join(self.video_folder, video_name)
+        self.video_recorder = VideoRecorder(
+            env=self.env,
+            base_path=base_path,
+            metadata={"step_id": self.step_id, "episode_id": self.episode_id},
+            encoder=self.encoder
+        )
+
+        self.video_recorder.capture_frame()
+        self.recorded_frames = 1
+        self.recording = True
 
 
 class Trainer:
@@ -213,7 +308,8 @@ if __name__ == "__main__":
     env = RecordVideoSerializable(
         env, 
         f"videos/test",
-        episode_trigger = 10
+        episode_trigger = 10,
+        encoder="libopenh264"
     )
     
     config = AgentConfig(

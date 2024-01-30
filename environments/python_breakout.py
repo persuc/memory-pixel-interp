@@ -376,7 +376,7 @@ class PythonMemoryEnv(gym.Env):
 
     def render(self, mode: Literal["human", "rgb_array", None]):
         if mode != "rgb_array":
-            raise Exception(f"Requested render but environment was initialized with render_mode={self.render_mode}")
+            raise NotImplemented(f"Render mode \"{mode}\" is not supported")
         if self.render_mode != "rgb_array":
             raise Exception(f"Requested rgb_array but environment was initialized with render_mode={self.render_mode}")
         screen = pygame.Surface((self.runner.screen_width, self.runner.screen_height))
