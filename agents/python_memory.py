@@ -4,7 +4,7 @@ import sys
 import os
 import time
 from typing import Literal
-from gym import error, logger
+from gym import error
 from gym.wrappers.record_video import RecordVideo
 from gym.wrappers.monitoring.video_recorder import VideoRecorder as GymVideoRecorder, ImageEncoder as GymImageEncoder
 import torch
@@ -144,7 +144,6 @@ class ImageEncoder(GymImageEncoder):
             self.output_path,
         )
 
-        logger.debug('Starting %s with "%s"', self.backend, " ".join(self.cmdline))
         if hasattr(os, "setsid"):  # setsid not present on Windows
             self.proc = subprocess.Popen(
                 self.cmdline, stdin=subprocess.PIPE, preexec_fn=os.setsid
@@ -169,7 +168,6 @@ class VideoRecorder(GymVideoRecorder):
         try:
             self.encoder.capture_frame(frame)
         except error.InvalidFrame as e:
-            logger.warn("Tried to pass invalid video frame, marking as broken: %s", e)
             self.broken = True
         else:
             self.empty = False
@@ -309,13 +307,13 @@ if __name__ == "__main__":
         env, 
         f"videos/test",
         episode_trigger = 10,
-        encoder="libopenh264"
+        encoder="libx264"
     )
     
     config = AgentConfig(
         seed=1,
         environment=env,
-        num_episodes_to_run=100,
+        num_episodes_to_run=300,
         hyperparameters=policy_gradient_agent_params,
         save_model_path="./PythonMemory.pt",
     )

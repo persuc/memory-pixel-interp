@@ -26,8 +26,12 @@ Extensions: Show Recommended Extensions
 `touch ~/.no_auto_tmux`
 
 To get video logging to work you may need to install video codecs:
-<!-- `conda update --force conda`
-`conda update ffmpeg`
+<!-- https://pytorch.org/audio/stable/build.ffmpeg.html -->
+<!-- `sudo apt-get install libavcodec58 ffmpeg` -->
+<!-- `sudo apt-get install yasm libvpx. libx264.` -->
+`conda update --force conda` <!-- pytorch::ffmpeg-4.3-hf484d3e_0 > pkgs/main::ffmpeg-4.2.2-h20bf706_0 -->
+`conda install -c conda-forge x264`
+<!-- `conda update ffmpeg`
 `apt-get install libx264-155` (for Ubuntu 20.04 LTS)
 `apt-get install ffmpeg` -->
 
