@@ -59,8 +59,8 @@ class Ball:  # class for ball vars
         self.yPos = (self.speed / tSlope) * self.yPos
         self.adjusted = True
 
-    def reset(self, rand: float):
-        self.x = 53 + 480 * rand
+    def reset(self, rng: np.random.Generator):
+        self.x = 53 + 480 * rng.random()
         self.y = 300
         self.xPos = 1
         self.yPos = 1
@@ -136,10 +136,11 @@ class Runner:
     screen_height = 480
     ball_start_x: np.ndarray[Any, np.dtypes.Float64DType]
     lives = 3
+    rng: np.random.Generator
 
     def __init__(self, render_mode: Literal["human", "rgb_array", None]):
         self.render_mode = render_mode
-        self.ball_start_x = np.random.rand(self.lives)
+        self.rng = np.random.default_rng()
 
         pygame.init()
         if self.render_mode is not None:
@@ -183,9 +184,7 @@ class Runner:
         self.reset()
 
     def seed(self, seed: int) -> None:
-        np.random.seed(seed)
-        self.ball_start_x = np.random.rand(self.lives)
-        self.reset()
+        self.rng = np.random.default_rng(seed=seed)
 
     def reset(self) -> None:
         # TODO: the board is laid out height x width in memory
@@ -198,7 +197,7 @@ class Runner:
         self.score = 0
         self.paddle = Paddle()
         self.ball = Ball()
-        self.ball.reset(self.ball_start_x[self.ball.remaining - 1])
+        self.ball.reset(self.rng)
         self.steps = 0
 
     def step(self, direction: Literal["left", "right", "none"]) -> None:
@@ -381,10 +380,10 @@ class PythonMemoryEnv(gym.Env):
             return self._get_obs(), self._get_info()
         return self._get_obs()
 
-    def step(self, action: Literal["left", "right", "none"]):
+    def step(self, action: Literal[0, 1, 2]):
         self.runner.render_mode = self.render_mode
         if self.runner.ball.remaining:
-            self.runner.step(action)
+            self.runner.step(self._action_to_direction[action])
             reward = self.runner.score - self.current_score
             self.current_score = self.runner.score
         else:
