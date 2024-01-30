@@ -370,7 +370,7 @@ class PythonMemoryEnv(gym.Env):
         return (
             self._get_obs(),
             reward,
-            self.runner.ball.remaining > 0,
+            self.runner.ball.remaining == 0,
             self._get_info(),
         )
 

@@ -41,7 +41,6 @@ class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
         """Plays 1 episode using the fixed policy and returns the data"""
         state: list[int | float]
         state, _info = self.reset_game()
-        # 
         done = False
         episode_states = []
         episode_actions = []
@@ -55,7 +54,6 @@ class Parallel_Experience_Generator(DeepRLA_Parallel_Experience_Generator):
             episode_actions.append(action)
             episode_rewards.append(reward)
             state = next_state
-            # print(f"{state=}")
         return episode_states, episode_actions, episode_rewards
     
     def pick_action(self, state: list[int | float], epsilon_exploration: float) -> Literal[0, 1, 2]:
@@ -141,7 +139,8 @@ class Trainer:
         """Runs a step for the PPO agent"""
         exploration_epsilon =  self.agent.exploration_strategy.get_updated_epsilon_exploration({"episode_number": self.agent.episode_number})
         self.agent.many_episode_states, self.agent.many_episode_actions, self.agent.many_episode_rewards = self.agent.experience_generator.play_n_episodes(
-            self.agent.hyperparameters["episodes_per_learning_round"], exploration_epsilon)
+            self.agent.hyperparameters["episodes_per_learning_round"], exploration_epsilon
+        )
         self.agent.episode_number += self.agent.hyperparameters["episodes_per_learning_round"]
         self.policy_learn()
         self.agent.update_learning_rate(self.agent.hyperparameters["learning_rate"], self.agent.policy_new_optimizer)
@@ -171,9 +170,9 @@ class Trainer:
         print(self.agent.hyperparameters)
         print("RANDOM SEED ", self.agent_config.seed)
 
-        round = 0
+        episode = 0
         start = time.time()
-        while round < self.agent_config.num_episodes_to_run:
+        while episode < self.agent_config.num_episodes_to_run:
             self.agent.reset_game()
             self.step_agent()
             avg_loss = sum(self.loss_history[-itr_per_round:]) / itr_per_round
@@ -187,12 +186,12 @@ class Trainer:
 
             if isinstance(self.agent_config.save_model_path, str):
                 torch.save({
-                    "round": round,
+                    "episode": episode,
                     "model_state_dict": self.agent.policy_new.state_dict(),
                     "optimizer_state_dict": self.agent.policy_new_optimizer.state_dict(),
                     "train_loss_history": self.loss_history,
                 }, self.agent_config.save_model_path)
-            round += 1
+            episode += 1
         time_taken = time.time() - start
         if show_whether_achieved_goal:
             self.agent.show_whether_achieved_goal()

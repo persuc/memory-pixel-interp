@@ -1,3 +1,17 @@
+## Getting Started
+
+Clone the repo (with submodules):
+`git clone --recurse-submodules -j8 https://github.com/persuck/memory-pixel-interp.git`
+
+If you already cloned the repo but need to clone the submodules:
+`git submodule update --init --recursive`
+
+Install deps:
+`pip install -r requirements.txt`
+
+Or make a virtual env:
+`python -m venv env && source ./env/bin/activate && pip install -r requirements.txt`
+
 ## Summary
 
 Core components of this project:
