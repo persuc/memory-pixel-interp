@@ -19,12 +19,14 @@
 #                                   #
 #####################################
 
+import builtins
 import math, pygame, sys
-import numpy
+import numpy as np
 import gym
+import struct
 from gym import spaces
 from gym.envs.registration import EnvSpec
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, Tuple, Union
 
 # variables------------------------------------
 bx, by = 50, 150  # board position
@@ -132,12 +134,12 @@ class Runner:
     board_height = 6
     screen_width = 640
     screen_height = 480
-    ball_start_x: numpy.ndarray[Any, numpy.dtypes.Float64DType]
+    ball_start_x: np.ndarray[Any, np.dtypes.Float64DType]
     lives = 3
 
     def __init__(self, render_mode: Literal["human", "rgb_array", None]):
         self.render_mode = render_mode
-        self.ball_start_x = numpy.random.rand(self.lives)
+        self.ball_start_x = np.random.rand(self.lives)
 
         pygame.init()
         if self.render_mode is not None:
@@ -181,11 +183,11 @@ class Runner:
         self.reset()
 
     def seed(self, seed: int) -> None:
-        numpy.random.seed(seed)
-        self.ball_start_x = numpy.random.rand(self.lives)
+        np.random.seed(seed)
+        self.ball_start_x = np.random.rand(self.lives)
         self.reset()
 
-    def reset(self):
+    def reset(self) -> None:
         # TODO: the board is laid out height x width in memory
         # but displayed as width x height in game
         self.board = []
@@ -199,7 +201,7 @@ class Runner:
         self.ball.reset(self.ball_start_x[self.ball.remaining - 1])
         self.steps = 0
 
-    def step(self, direction: Literal["left", "right", "none"]):
+    def step(self, direction: Literal["left", "right", "none"]) -> None:
         colO = False  # check collision with the orange row, for speed purposes
         colR = False  # same but for red row
         self.paddle.direction = direction
@@ -216,7 +218,7 @@ class Runner:
             self.ball.reset(self.ball_start_x[self.ball.remaining - 1])
 
 
-    def game(self, colO, colR):
+    def game(self, colO, colR) -> None:
         if self.render_mode == "human":
             do_render(self.screen, self.colors, self.row_colors, self.board, self.ball, self.paddle, self.wall1, self.wall2, self.wall3, self.score, self.fontObj)
 
@@ -294,11 +296,29 @@ class Runner:
                 pygame.display.update()
                 self.fpsClock.tick(30)
 
-    def get_memory(self) -> list[int | float]:
+    def bool_repr_to_list(self, repr: str) -> list[bool]:
+        return [b == '0' for b in repr]
+    
+    def element_to_bits(self, element: int | float | np.float64 | bool) -> list[bool]:
+        # Everything (that may change size) is 64 bit!
+        match type(element):
+            case builtins.int:
+                return self.bool_repr_to_list(bin(element)[2:].zfill(64))
+            case builtins.float:
+                return [False] * 32 + self.bool_repr_to_list(''.join('{:0>8b}'.format(c) for c in struct.pack('!f', element)))
+            case np.float64:
+                return self.bool_repr_to_list(''.join('{:0>8b}'.format(c) for c in struct.pack('!d', element.item())))
+            case builtins.bool:
+                return [element]
+            case _:
+                raise NotImplemented(f"Cannot convert {type(element)} to list[bool]")
+
+
+    def get_memory(self) -> list[bool]:
         flat_board = []
         for row in self.board:
             flat_board.extend(row)
-        return [
+        return [j for sub in [self.element_to_bits(element) for element in [
             self.steps,
             *flat_board,
             self.score,
@@ -311,7 +331,7 @@ class Runner:
             self.ball.yPos,
             self.ball.adjusted,
             self.ball.speed,
-        ]
+        ]] for j in sub]
 
 class PythonMemoryEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
@@ -324,18 +344,19 @@ class PythonMemoryEnv(gym.Env):
         assert render_mode is None or render_mode in self.metadata["render_modes"], f"render_mode must be None, \"human\", or \"rgb_array\""
         self.render_mode = render_mode
         self.runner = Runner(render_mode=self.render_mode)
+        self.runner.reset()
         self.current_score = 0
 
-        board_size = self.runner.board_width * self.runner.board_height
-        self.state_size = board_size + 11
-
+        self.state_size = len(self.runner.get_memory())
+        # board_size = self.runner.board_width * self.runner.board_height
+        
         max_reward = self.runner.board_width * 2 * 1 + self.runner.board_width * 2 * 4 + self.runner.board_width * 2 * 7
 
         self.spec = EnvSpec(id_requested=self.env, entry_point='environments.python_breakout:PythonMemoryEnv', reward_threshold=max_reward, max_episode_steps=300)
         
-        self.observation_space = spaces.Discrete(self.state_size)
+        self.observation_space = spaces.MultiBinary(self.state_size)
         
-        # We have 2 actions, corresponding to right, left, none
+        # We have 3 actions, corresponding to right, left, none
         self.action_space = spaces.Discrete(3)
 
         self._action_to_direction: Mapping[Literal[0, 1, 2], Literal["left", "right", "none"]] = {
@@ -353,10 +374,12 @@ class PythonMemoryEnv(gym.Env):
     def seed(self, seed: int) -> None:
         self.runner.seed(seed)
 
-    def reset(self, seed=None, options=None):
+    def reset(self, seed=None, options=None, return_info: bool = False) -> Union[list[bool], Tuple[list[bool], dict]]:
         self.runner.reset()
         self.current_score = self.runner.score
-        return self._get_obs(), self._get_info()
+        if return_info:
+            return self._get_obs(), self._get_info()
+        return self._get_obs()
 
     def step(self, action: Literal["left", "right", "none"]):
         self.runner.render_mode = self.render_mode
@@ -381,8 +404,8 @@ class PythonMemoryEnv(gym.Env):
             raise Exception(f"Requested rgb_array but environment was initialized with render_mode={self.render_mode}")
         screen = pygame.Surface((self.runner.screen_width, self.runner.screen_height))
         do_render(screen, self.runner.colors, self.runner.row_colors, self.runner.board, self.runner.ball, self.runner.paddle, self.runner.wall1, self.runner.wall2, self.runner.wall3)
-        return numpy.transpose(
-            numpy.array(pygame.surfarray.pixels3d(screen)).copy(), axes=(1, 0, 2)
+        return np.transpose(
+            np.array(pygame.surfarray.pixels3d(screen)).copy(), axes=(1, 0, 2)
         )
 
 
