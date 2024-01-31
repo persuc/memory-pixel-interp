@@ -14,8 +14,8 @@
 #                                   #
 #  Scoring:                         #
 #  - Green / blue blocks ........ 1 #
-#  - Yellow / gold blocks ....... 4 #
-#  - orange / red blocks ........ 7 #
+#  - Yellow / gold blocks ....... 2 #
+#  - orange / red blocks ........ 3 #
 #                                   #
 #####################################
 
@@ -223,6 +223,8 @@ class Runner:
         # check all the collisions-------------------------
         if self.ball.adjusted == False:
             self.ball.adjust()
+        prev_x = self.ball.x
+        prev_y = self.ball.y
         self.ball.x += self.ball.xPos
         self.ball.y += self.ball.yPos
         if self.ball.y < 455 and self.ball.y > 445:
@@ -253,19 +255,26 @@ class Runner:
                     block = pygame.Rect(30 * x + bx - 1, 12 * y + by - 1, 32, 14)
                     if block.collidepoint(self.ball.x, self.ball.y) == True:
                         self.board[x][y] = 0
-                        ##                            if y*12+by+12 < self.ball.y: FIX THIS ITS THE BLOCK BUG
-                        ##                                self.ball.y = -(self.ball.y)
-                        ##                            elif x*30+bx+30 <
-                        self.ball.yPos = -self.ball.yPos  # Cheat
+                        
+                        # slope = abs(self.ball.xPos / self.ball.yPos)
+                        if prev_y < block.top:
+                            self.ball.yPos = -abs(self.ball.yPos)
+                        elif prev_x < block.left or prev_x > block.right:
+                            self.ball.xPos = -self.ball.xPos
+                        elif prev_y > block.top:
+                            self.ball.yPos = abs(self.ball.yPos)
+                        else:
+                            self.ball.yPos = -abs(self.ball.yPos)
+                            
                         if y == 4 or y == 5:
                             self.score += 1
                         elif y == 2 or y == 3:
-                            self.score += 4
+                            self.score += 2
                             if colO == False:
                                 colO = True
                                 self.ball.speed += 1
                         else:
-                            self.score += 7
+                            self.score += 3
                             if colR == False:
                                 colR = True
                                 self.ball.speed += 2
