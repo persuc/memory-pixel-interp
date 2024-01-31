@@ -424,6 +424,7 @@ class PythonMemoryEnv(gym.Env):
 if __name__ == "__main__":
     runner = Runner(render_mode="human")
     runner.seed(0)
+    paused = False
     while runner.ball.remaining > 0:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -431,10 +432,14 @@ if __name__ == "__main__":
                 sys.exit()
 
             elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_p:
+                    paused = not paused
                 if event.key == pygame.K_LEFT:
                     runner.paddle.direction = "left"
                 if event.key == pygame.K_RIGHT:
                     runner.paddle.direction = "right"
+                if event.key == pygame.K_SPACE:
+                    runner.step(runner.paddle.direction)
             elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_LEFT:
                     if runner.paddle.direction == "left":
@@ -442,4 +447,5 @@ if __name__ == "__main__":
                 if event.key == pygame.K_RIGHT:
                     if runner.paddle.direction == "right":
                         runner.paddle.direction = "none"
-        runner.step(runner.paddle.direction)
+        if not paused:
+            runner.step(runner.paddle.direction)
