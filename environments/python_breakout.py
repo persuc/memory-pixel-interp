@@ -348,29 +348,26 @@ class Runner:
             self.ball.speed,
         ]] for j in sub]
 
-class PythonMemoryEnv(gym.Env):
+class BaseEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
-    env = "arena-3/PythonBreakoutMemory-v0"
     spec: EnvSpec
     state_size: int
     render_mode: Literal["human", "rgb_array", None]
     paddle_collision_reward = 0.25
     distance_reward_coef = 0.01
 
-    def __init__(self, render_mode=None):
+    def __init__(self, name: str, entrypoint: str, render_mode=None):
         assert render_mode is None or render_mode in self.metadata["render_modes"], f"render_mode must be None, \"human\", or \"rgb_array\""
         self.render_mode = render_mode
+        self.env = name
         self.runner = Runner(render_mode=self.render_mode)
         self.runner.reset()
 
-        self.state_size = len(self.runner.get_memory())
         # board_size = self.runner.board_width * self.runner.board_height
         
         max_reward = self.runner.board_width * 2 * 1 + self.runner.board_width * 2 * 2 + self.runner.board_width * 2 * 3
 
-        self.spec = EnvSpec(id_requested=self.env, entry_point='environments.python_breakout:PythonMemoryEnv', reward_threshold=max_reward, max_episode_steps=600)
-        
-        self.observation_space = spaces.MultiBinary(self.state_size)
+        self.spec = EnvSpec(id_requested=self.env, entry_point=entrypoint, reward_threshold=max_reward, max_episode_steps=600)
         
         # We have 3 actions, corresponding to none, left, right
         self.action_space = spaces.Discrete(3)
@@ -389,7 +386,7 @@ class PythonMemoryEnv(gym.Env):
         }
 
     def _get_obs(self):
-        return self.runner.get_memory()
+        raise NotImplemented()
 
     def _get_info(self):
         return {}
@@ -442,6 +439,24 @@ class PythonMemoryEnv(gym.Env):
             np.array(pygame.surfarray.pixels3d(screen)).copy(), axes=(1, 0, 2)
         )
 
+class PythonMemoryEnv(BaseEnv):
+    def __init__(self, render_mode=None):
+        super().__init__("arena-3/PythonBreakoutMemory-v0", 'environments.python_breakout:PythonMemoryEnv', render_mode=render_mode)
+        self.state_size = len(self.runner.get_memory())
+        self.observation_space = spaces.MultiBinary(self.state_size)
+
+    def _get_obs(self):
+        return self.runner.get_memory()
+
+
+class PythonPixelsEnv(BaseEnv):
+    def __init__(self, render_mode=None):
+        super().__init__("arena-3/PythonBreakoutPixels-v0", 'environments.python_breakout:PythonPixelsEnv', render_mode=render_mode)
+        self.state_size = self.runner.screen_width * self.runner.screen_height
+        self.observation_space = spaces.Box(low=0, high=255, shape=(self.runner.screen_height, self.runner.screen_width, 3), dtype=np.uint8)
+
+    def _get_obs(self):
+        return super().render(mode="rgb_array")
 
 # -----------------------------------------------------
 if __name__ == "__main__":

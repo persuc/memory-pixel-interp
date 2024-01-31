@@ -1,11 +1,10 @@
 # %%
-from enum import Enum
 import gym
 import numpy as np
 import random
 import torch as t
-from typing import Optional, Literal
-from dataclasses import dataclass
+from typing import Callable, Optional, Literal, Tuple
+from dataclasses import dataclass, field
 import pandas as pd
 from IPython.display import display
 Arr = np.ndarray
@@ -35,41 +34,57 @@ from gym.wrappers.transform_observation import TransformObservation
 from gym.wrappers.normalize import NormalizeReward
 from gym.wrappers.transform_reward import TransformReward
 
-class ModelType(Enum):
-  CLASSIC_CONTROL = 1
-  CONVOLUTIONAL = 2
-  SPARSE = 3
-  CLASSIC_CONTROL_WRAPPED = 4
+@dataclass
+class PPOArgs:
+    env_id: str
+    model_type: Literal["classic_control", "convolutional", "sparse"]
+    exp_name: str
+    seed: int = 1
+    cuda: bool = t.cuda.is_available()
+    log_dir: str = "logs"
+    wandb_project_name: Optional[str] = None
+    wandb_entity: Optional[str] = None
+    episodes_per_video: Optional[int] = 20 # if None, no videos will be recorded
+    total_timesteps: int = 500_000
+    learning_rate: float = 0.00025
+    num_envs: int = 4
+    num_steps: int = 128
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    num_minibatches: int = 4
+    batches_per_learning_phase: int = 4
+    clip_coef: float = 0.2
+    ent_coef: float = 0.01
+    vf_coef: float = 0.5
+    max_grad_norm: float = 0.5
+    save_nth_epoch: Optional[Tuple[int, str]] = None # number of epochs, filepath
+    wrap_env: Optional[Callable[[gym.Env], gym.Env]] = None # function that adds wrappers to env
+    make_kwargs: dict = field(default_factory=dict)
 
-def make_env(env_id: str, seed: int, idx: int, capture_video: bool, run_name: str, mode: ModelType, video_log_freq: Optional[int] = None):
+    def __post_init__(self):
+        self.batch_size = self.num_steps * self.num_envs
+        assert self.batch_size % self.num_minibatches == 0, "batch_size must be divisible by num_minibatches"
+        self.minibatch_size = self.batch_size // self.num_minibatches
+        self.total_phases = self.total_timesteps // self.batch_size
+        self.total_training_steps = self.total_phases * self.batches_per_learning_phase * self.num_minibatches
+
+
+def make_env(args: PPOArgs, seed: int, idx: int, run_name: str):
     """Return a function that returns an environment after setting up boilerplate."""
 
-    if video_log_freq is None:
-        video_log_freq = {
-            ModelType.CLASSIC_CONTROL: 25,
-            ModelType.CLASSIC_CONTROL_WRAPPED: 20,
-            ModelType.CONVOLUTIONAL: 30,
-            ModelType.SPARSE: 50
-        }[mode]
-
     def thunk():
-        env = gym.make(env_id)
+        env = gym.make(id=args.env_id, **args.make_kwargs)
         env = RecordEpisodeStatistics(env)
-        if capture_video:
+        if args.episodes_per_video is not None:
             if idx == 0:
                 env = RecordVideo(
                     env, 
                     f"videos/{run_name}", 
-                    episode_trigger = lambda x : x % video_log_freq == 0
+                    episode_trigger = lambda x : x % args.episodes_per_video == 0
                 )
 
-        match mode:
-            case ModelType.CONVOLUTIONAL:
-                env = prepare_atari_env(env)
-            case ModelType.SPARSE:
-                env = prepare_mujoco_env(env)
-            case ModelType.CLASSIC_CONTROL_WRAPPED:
-                env = prepare_memory_env(env)
+        if args.wrap_env is not None:
+            env = args.wrap_env(env)
         
         obs = env.reset(seed=seed)
         env.action_space.seed(seed)
@@ -78,30 +93,59 @@ def make_env(env_id: str, seed: int, idx: int, capture_video: bool, run_name: st
     
     return thunk
 
-def prepare_memory_env(env: gym.Env):
+def wrap_memory_env(env: gym.Env):
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
     env = EpisodicLifeEnv(env, lambda env: env.unwrapped.lives())
     env = ClipRewardEnv(env)
     # TODO: fix framestack for MultiBinary obs space
-    # env = FrameStack(env, num_stack=4)
+    env = FrameStack(env, num_stack=4)
     return env
 
-
-def prepare_atari_env(env: gym.Env):
+def wrap_pixels_env(env: gym.Env):
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
-    env = EpisodicLifeEnv(env, lambda env: env.unwrapped.ale.lives())
-    if "FIRE" in env.unwrapped.get_action_meanings():
-        env = FireResetEnv(env)
+    env = EpisodicLifeEnv(env, lambda env: env.unwrapped.lives())
     env = ClipRewardEnv(env)
     env = ResizeObservation(env, shape=(84, 84))
     env = GrayScaleObservation(env)
     env = FrameStack(env, num_stack=4)
     return env
 
+# def wrap_atari_env(env: gym.Env):
+#     env = NoopResetEnv(env, noop_max=30)
+#     env = MaxAndSkipEnv(env, skip=4)
+#     env = EpisodicLifeEnv(env, lambda env: env.unwrapped.ale.lives())
+#     if "FIRE" in env.unwrapped.get_action_meanings():
+#         env = FireResetEnv(env)
+#     env = ClipRewardEnv(env)
+#     env = ResizeObservation(env, shape=(84, 84))
+#     env = GrayScaleObservation(env)
+#     env = FrameStack(env, num_stack=4)
+#     return env
 
-def prepare_mujoco_env(env: gym.Env):
+def wrap_atari_env(env: gym.Env):
+    env = NoopResetEnv(env, noop_max=30)
+    env = MaxAndSkipEnv(env, skip=4)
+    env = EpisodicLifeEnv(env, lambda env: env.unwrapped.ale.lives())
+    if "FIRE" in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = ClipRewardEnv(env)
+    return env
+
+def wrap_atari_memory_env(env: gym.Env):
+    env = wrap_atari_env(env)
+    env = FrameStack(env, num_stack=4)
+    return env
+
+def wrap_atari_pixels_env(env: gym.Env):
+    env = wrap_atari_env(env)
+    env = ResizeObservation(env, shape=(84, 84))
+    env = FrameStack(env, num_stack=4)
+    return env
+
+
+def wrap_mujoco_env(env: gym.Env):
     env = ClipAction(env)
     env = NormalizeObservation(env)
     env = TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
@@ -167,38 +211,6 @@ def sum_rewards(rewards : List[int], gamma : float = 1):
         total_reward *= gamma
     total_reward += rewards[0]
     return total_reward
-
-@dataclass
-class PPOArgs:
-	exp_name: str = "PPO_Implementation"
-	seed: int = 1
-	cuda: bool = t.cuda.is_available()
-	log_dir: str = "logs"
-	use_wandb: bool = False
-	wandb_project_name: str = "PPOCart"
-	wandb_entity: str = None
-	capture_video: bool = True
-	env_id: str = "CartPole-v1"
-	total_timesteps: int = 500000
-	learning_rate: float = 0.00025
-	num_envs: int = 4
-	num_steps: int = 128
-	gamma: float = 0.99
-	gae_lambda: float = 0.95
-	num_minibatches: int = 4
-	batches_per_learning_phase: int = 4
-	clip_coef: float = 0.2
-	ent_coef: float = 0.01
-	vf_coef: float = 0.5
-	max_grad_norm: float = 0.5
-	mode: Literal["classic-control", "atari", "mujoco"] = "classic-control"
-
-	def __post_init__(self):
-		self.batch_size = self.num_steps * self.num_envs
-		assert self.batch_size % self.num_minibatches == 0, "batch_size must be divisible by num_minibatches"
-		self.minibatch_size = self.batch_size // self.num_minibatches
-		self.total_phases = self.total_timesteps // self.batch_size
-		self.total_training_steps = self.total_phases * self.batches_per_learning_phase * self.num_minibatches
 
 arg_help_strings = dict(
     exp_name = "the name of this experiment",

@@ -112,15 +112,15 @@ def test_ppo_agent(my_PPOAgent):
 
     import PPO as solutions
    
-    args = solutions.PPOArgs(use_wandb=False, capture_video=False)
+    args = solutions.PPOArgs("test", "classic_control", "test")
     set_global_seeds(args.seed)
-    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, i, i, args.capture_video, None) for i in range(4)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, i, i, "run") for i in range(4)])
     agent_solns = solutions.PPOAgent(args, envs)
     for step in range(5):
         infos_solns = agent_solns.play_step()
     
     set_global_seeds(args.seed)
-    envs = gym.vector.SyncVectorEnv([make_env(args.env_id, i, i, args.capture_video, None) for i in range(4)])
+    envs = gym.vector.SyncVectorEnv([make_env(args, i, i, "run") for i in range(4)])
     agent: solutions.PPOAgent = my_PPOAgent(args, envs)
     agent.critic = copy.deepcopy(agent_solns.critic)
     agent.actor = copy.deepcopy(agent_solns.actor)
@@ -368,11 +368,10 @@ def test_probe(probe_idx: int):
   # Train our network
   args = solutions.PPOArgs(
     env_id=f"Probe{probe_idx}-v0",
+    model_type="classic_control",
     exp_name=f"test-probe-{probe_idx}",
     total_timesteps=[5000, 5000, 10000, 20000, 20000][probe_idx-1],
     learning_rate=0.001,
-    capture_video=False,
-    use_wandb=False,
   )
   agent = solutions.train(args)
 

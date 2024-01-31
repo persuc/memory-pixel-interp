@@ -21,8 +21,8 @@ import sys
 sys.path.append(str(Path.cwd()))
 import main
 
-from PPO_utils import make_env, set_global_seeds, ModelType
-from environments.python_breakout import PythonMemoryEnv
+from PPO_utils import PPOArgs, make_env, set_global_seeds, wrap_memory_env, wrap_pixels_env, wrap_atari_memory_env, wrap_atari_pixels_env
+from environments.python_breakout import PythonMemoryEnv, PythonPixelsEnv
 from utils.plotly_utils import plot_cartpole_obs_and_dones
 
 # If we don't want to run all the training code, this is useful
@@ -37,43 +37,6 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module='gym.*')
 warnings.filterwarnings("ignore", category=UserWarning, module='gym.*')
 
-@dataclass
-class PPOArgs:
-	model_type: ModelType
-	exp_name: str = "PPO_Implementation"
-	seed: int = 1
-	cuda: bool = t.cuda.is_available()
-	log_dir: str = "logs"
-	use_wandb: bool = False
-	wandb_project_name: str = "PPOCart"
-	wandb_entity: Optional[str] = None
-	capture_video: bool = True
-	env_id: str = "CartPole-v1"
-	total_timesteps: int = 500_000
-	learning_rate: float = 0.00025
-	num_envs: int = 4
-	num_steps: int = 128
-	gamma: float = 0.99
-	gae_lambda: float = 0.95
-	num_minibatches: int = 4
-	batches_per_learning_phase: int = 4
-	clip_coef: float = 0.2
-	ent_coef: float = 0.01
-	vf_coef: float = 0.5
-	max_grad_norm: float = 0.5
-	save_nth_epoch: Optional[Tuple[int, str]] = None # number of epochs, filepath
-
-	def __post_init__(self):
-		self.batch_size = self.num_steps * self.num_envs
-		assert self.batch_size % self.num_minibatches == 0, "batch_size must be divisible by num_minibatches"
-		self.minibatch_size = self.batch_size // self.num_minibatches
-		self.total_phases = self.total_timesteps // self.batch_size
-		self.total_training_steps = self.total_phases * self.batches_per_learning_phase * self.num_minibatches
-
-
-
-# print example args
-# utils.arg_help(PPOArgs(num_minibatches=2))
 
 # 1️⃣ SETTING UP OUR AGENT
 
@@ -84,7 +47,7 @@ def layer_init(layer: nn.Module, std=np.sqrt(2), bias_const=0.0):
 
 def get_actor_and_critic(
 	envs: gym.vector.SyncVectorEnv,
-	mode: ModelType,
+	mode: Literal["classic_control", "convolutional", "sparse"],
 ) -> Tuple[nn.Sequential, nn.Sequential]:
 	'''
 	Returns (actor, critic), the networks used for PPO.
@@ -98,8 +61,9 @@ def get_actor_and_critic(
 	)
 
 	match mode:
-		case ModelType.CLASSIC_CONTROL | ModelType.CLASSIC_CONTROL_WRAPPED:
+		case "classic_control":
 			critic = nn.Sequential(
+				nn.Flatten(),
 				layer_init(nn.Linear(num_obs, 64)),
 				nn.Tanh(),
 				layer_init(nn.Linear(64, 64)),
@@ -108,13 +72,14 @@ def get_actor_and_critic(
 			)
 
 			actor = nn.Sequential(
+				nn.Flatten(),
 				layer_init(nn.Linear(num_obs, 64)),
 				nn.Tanh(),
 				layer_init(nn.Linear(64, 64)),
 				nn.Tanh(),
 				layer_init(nn.Linear(64, num_actions), std=0.01)
 			)
-		case ModelType.CONVOLUTIONAL:
+		case "convolutional":
 	
 			assert obs_shape[-1] % 8 == 4
 
@@ -141,8 +106,11 @@ def get_actor_and_critic(
 				layer_init(nn.Linear(512, 1), std=1)
 			)
 	
-		case ModelType.SPARSE:
+		case "sparse":
 			raise NotImplementedError("See `mujoco.py`.")
+		
+		case _:
+			raise NotImplementedError(f"Mode not recognised: {mode}")
 
 	return actor.to(device), critic.to(device)
 
@@ -504,25 +472,25 @@ class PPOTrainer:
 		set_global_seeds(args.seed)
 		self.args = args
 		self.run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
-		made_envs = [make_env(args.env_id, args.seed + i, i, args.capture_video, self.run_name, args.model_type) for i in range(args.num_envs)]
+		made_envs = [make_env(args, args.seed + i, i, self.run_name) for i in range(args.num_envs)]
 		self.envs = gym.vector.SyncVectorEnv(made_envs)
 		if agent is None:
-			self.agent = PPOAgent(self.args, self.envs).to(device)
+			self.agent = PPOAgent(args, self.envs).to(device)
 		else:
-			reference_agent = PPOAgent(self.args, self.envs).to(device)
 			self.agent = agent.to(device)
+			reference_agent = PPOAgent(args, self.envs).to(device)
 			param_shapes = zip(self.agent.parameters(), reference_agent.parameters())
 			for agent_param, reference_param in param_shapes:
 				if agent_param.shape != reference_param.shape:
 					print(f"Provided agent has incorrect shape.\nGot:{list(agent.parameters())}\nExpected:{list(reference_agent.parameters())}")
-		self.optimizer, self.scheduler = make_optimizer(self.agent, self.args.total_training_steps, self.args.learning_rate, 0.0)
+		self.optimizer, self.scheduler = make_optimizer(self.agent, args.total_training_steps, args.learning_rate, 0.0)
 		self.epoch = 0
 		self.max_reward_earned = None # TODO: implement max reward seen thus far
-		if args.use_wandb: wandb.init(
+		if args.wandb_project_name is not None: wandb.init(
 			project=args.wandb_project_name,
 			entity=args.wandb_entity,
 			name=self.run_name,
-			monitor_gym=args.capture_video
+			monitor_gym=args.episodes_per_video is not None
 		)
 
 	def rollout_phase(self) -> Optional[float]:
@@ -541,10 +509,11 @@ class PPOTrainer:
 				if "episode" in info.keys():
 					episode_len = info["episode"]["l"]
 					episode_return = info["episode"]["r"]
-					if self.args.use_wandb: wandb.log({
+					if self.args.wandb_project_name is not None: wandb.log({
 						"episode_length": episode_len,
 						"episode_return": episode_return,
 					}, step=self.agent.steps)
+					episode_lengths.append(episode_len)
 		
 		# TODO: debug framy video where potentially env.step() is called more often than env.render()
 		# runners: list[PythonMemoryRunner] = [e.unwrapped.runner for e in self.agent.envs.envs]
@@ -595,7 +564,7 @@ class PPOTrainer:
 			ratio = logratio.exp()
 			approx_kl = (ratio - 1 - logratio).mean().item()
 			clipfracs = [((ratio - 1.0).abs() > self.args.clip_coef).float().mean().item()]
-		if self.args.use_wandb: wandb.log(dict(
+		if self.args.wandb_project_name is not None: wandb.log(dict(
 			total_steps = self.agent.steps,
 			values = values.mean().item(),
 			learning_rate = self.scheduler.optimizer.param_groups[0]["lr"],
@@ -611,14 +580,13 @@ class PPOTrainer:
 	def train(self) -> PPOAgent:
 		'''Implements training loop, used like: agent = train(args)'''
 
-		progress_bar = tqdm(range(args.total_phases))
+		progress_bar = tqdm(range(self.args.total_phases))
 
 		for epoch in progress_bar:
 			self.epoch += 1
 
 			avg_episode_len = self.rollout_phase()
-			if avg_episode_len is not None:
-				progress_bar.set_description(f"Epoch {epoch:02}, Avg Episode Length: {avg_episode_len}")
+			progress_bar.set_description(f"Epoch {epoch:02}" + f", Avg Episode Length: {avg_episode_len:.2f}" if avg_episode_len is not None else "")
 
 			self.learning_phase()
 
@@ -630,7 +598,7 @@ class PPOTrainer:
 				}, f"{self.args.save_nth_epoch[1]}-Epoch{self.epoch}.pt")
 		
 		self.envs.close()
-		if args.use_wandb:
+		if self.args.wandb_project_name is not None:
 			wandb.finish()
 
 		return self.agent
@@ -688,31 +656,85 @@ class PPOTrainer:
 # 	agent = train(args)
 
 
-# if MAIN and ("Breakout" in RUN_TRAINING):
-# 	args = PPOArgs(
-# 		env_id = "ALE/Breakout-v5",
-# 		wandb_project_name = "PPOAtari",
-# 		use_wandb = True,
-# 		mode = "atari",
-# 		clip_coef = 0.1,
-# 		num_envs = 8,
-# 	)
+def train_memory():
+	id = "pythonmemory/Breakout-v0"
+	name = "PythonMemoryBreakout"
+	gym.envs.registration.register(id=id, entry_point=PythonMemoryEnv, max_episode_steps=500, kwargs={"render_mode": "rgb_array"})
+	args = PPOArgs(
+		env_id = id,
+		model_type="classic_control",
+		exp_name = name,
+		wandb_project_name = name,
+		clip_coef = 0.1,
+		num_envs = 8,
+		episodes_per_video=20,
+		save_nth_epoch=(20, name),
+		wrap_env=wrap_memory_env,
+	)
 
-# 	agent = train(args)
+	trainer = PPOTrainer(args)
 
-gym.envs.registration.register(id="pythonmemory/Breakout-v0", entry_point=PythonMemoryEnv, max_episode_steps=500, kwargs={"render_mode": "rgb_array"})
+	return trainer.train()
 
-args = PPOArgs(
-  env_id = "pythonmemory/Breakout-v0",
-	exp_name = "PythonMemoryBreakout",
-  wandb_project_name = "PythonMemoryBreakout",
-  use_wandb = True,
-  model_type=ModelType.CLASSIC_CONTROL_WRAPPED,
-  clip_coef = 0.1,
-  num_envs = 8,
-	save_nth_epoch=(20, "PythonMemory")
-)
 
-trainer = PPOTrainer(args)
+def train_pixels():
+	id = "pythonpixels/Breakout-v0"
+	name = "PythonPixelsBreakout"
+	gym.envs.registration.register(id=id, entry_point=PythonPixelsEnv, max_episode_steps=500, kwargs={"render_mode": "rgb_array"})
+	args = PPOArgs(
+		env_id = id,
+		exp_name = name,
+		model_type="convolutional",
+		wandb_project_name = name,
+		clip_coef = 0.1,
+		num_envs = 8,
+		episodes_per_video=20,
+		save_nth_epoch=(20, name),
+		wrap_env=wrap_pixels_env,
+	)
 
-agent = trainer.train()
+	trainer = PPOTrainer(args)
+
+	return trainer.train()
+
+def train_gym_memory():
+	name = "PPOMemory"
+	args = PPOArgs(
+		env_id = "ALE/Breakout-v5",
+		exp_name = name,
+		model_type="classic_control",
+		wandb_project_name = name,
+		clip_coef = 0.1,
+		num_envs = 8,
+		episodes_per_video=20,
+		make_kwargs={"obs_type": "ram"},
+		save_nth_epoch=(50, name),
+		wrap_env=wrap_atari_memory_env,
+	)
+
+	trainer = PPOTrainer(args)
+	return trainer.train()
+
+def train_gym_pixels():
+	name = "PPOPixels"
+	args = PPOArgs(
+		env_id = "ALE/Breakout-v5",
+		model_type="convolutional",
+		exp_name = name,
+		wandb_project_name = name,
+		clip_coef = 0.1,
+		num_envs = 8,
+		episodes_per_video=20,
+		make_kwargs={"obs_type": "grayscale"},
+		save_nth_epoch=(50, name),
+		wrap_env=wrap_atari_pixels_env,
+	)
+
+	trainer = PPOTrainer(args)
+	return trainer.train()
+
+if __name__ == "__main__":
+	# train_memory()
+	# train_pixels()
+	train_gym_memory()
+	# train_gym_pixels()
