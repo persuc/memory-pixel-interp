@@ -39,13 +39,15 @@ class ModelType(Enum):
   CLASSIC_CONTROL = 1
   CONVOLUTIONAL = 2
   SPARSE = 3
+  CLASSIC_CONTROL_WRAPPED = 4
 
-def make_env(env_id: str, seed: int, idx: int, capture_video: bool, run_name: str, mode: ModelType = ModelType.CLASSIC_CONTROL, video_log_freq: Optional[int] = None):
+def make_env(env_id: str, seed: int, idx: int, capture_video: bool, run_name: str, mode: ModelType, video_log_freq: Optional[int] = None):
     """Return a function that returns an environment after setting up boilerplate."""
 
     if video_log_freq is None:
         video_log_freq = {
             ModelType.CLASSIC_CONTROL: 25,
+            ModelType.CLASSIC_CONTROL_WRAPPED: 20,
             ModelType.CONVOLUTIONAL: 30,
             ModelType.SPARSE: 50
         }[mode]
@@ -61,10 +63,13 @@ def make_env(env_id: str, seed: int, idx: int, capture_video: bool, run_name: st
                     episode_trigger = lambda x : x % video_log_freq == 0
                 )
 
-        if mode == ModelType.CONVOLUTIONAL:
-            env = prepare_atari_env(env)
-        elif mode == ModelType.SPARSE:
-            env = prepare_mujoco_env(env)
+        match mode:
+            case ModelType.CONVOLUTIONAL:
+                env = prepare_atari_env(env)
+            case ModelType.SPARSE:
+                env = prepare_mujoco_env(env)
+            case ModelType.CLASSIC_CONTROL_WRAPPED:
+                env = prepare_memory_env(env)
         
         obs = env.reset(seed=seed)
         env.action_space.seed(seed)
@@ -73,11 +78,20 @@ def make_env(env_id: str, seed: int, idx: int, capture_video: bool, run_name: st
     
     return thunk
 
+def prepare_memory_env(env: gym.Env):
+    env = NoopResetEnv(env, noop_max=30)
+    env = MaxAndSkipEnv(env, skip=4)
+    env = EpisodicLifeEnv(env, lambda env: env.unwrapped.lives())
+    env = ClipRewardEnv(env)
+    # TODO: fix framestack for MultiBinary obs space
+    # env = FrameStack(env, num_stack=4)
+    return env
+
 
 def prepare_atari_env(env: gym.Env):
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
-    env = EpisodicLifeEnv(env)
+    env = EpisodicLifeEnv(env, lambda env: env.unwrapped.ale.lives())
     if "FIRE" in env.unwrapped.get_action_meanings():
         env = FireResetEnv(env)
     env = ClipRewardEnv(env)

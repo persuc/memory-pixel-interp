@@ -134,7 +134,6 @@ class Runner:
     board_height = 6
     screen_width = 640
     screen_height = 480
-    ball_start_x: np.ndarray[Any, np.dtypes.Float64DType]
     lives = 3
     rng: np.random.Generator
 
@@ -200,7 +199,7 @@ class Runner:
         self.ball.reset(self.rng)
         self.steps = 0
 
-    def step(self, direction: Literal["left", "right", "none"]) -> None:
+    def step(self, direction: Literal["none", "left", "right"]) -> None:
         colO = False  # check collision with the orange row, for speed purposes
         colR = False  # same but for red row
         self.paddle.direction = direction
@@ -214,7 +213,7 @@ class Runner:
         if not self.ball.alive:
             colO = False
             colR = False
-            self.ball.reset(self.ball_start_x[self.ball.remaining - 1])
+            self.ball.reset(self.rng)
 
 
     def game(self, colO, colR) -> None:
@@ -355,19 +354,29 @@ class PythonMemoryEnv(gym.Env):
         
         self.observation_space = spaces.MultiBinary(self.state_size)
         
-        # We have 3 actions, corresponding to right, left, none
+        # We have 3 actions, corresponding to none, left, right
         self.action_space = spaces.Discrete(3)
 
-        self._action_to_direction: Mapping[Literal[0, 1, 2], Literal["left", "right", "none"]] = {
-            0: "right",
+        self._action_to_direction: Mapping[Literal[0, 1, 2], Literal["none", "left", "right"]] = {
+            0: "none",
             1: "left",
-            2: "none"
+            2: "right",
+        }
+
+    def get_action_meanings(self):
+        return {
+            0: "NOOP",
+            1: "left",
+            2: "right",
         }
 
     def _get_obs(self):
         return self.runner.get_memory()
 
     def _get_info(self):
+        # TODO: use same format as play_step
+        # last_episode_len = info["episode"]["l"]
+        # last_episode_return = info["episode"]["r"]
         return {}
     
     def seed(self, seed: int) -> None:
@@ -379,10 +388,13 @@ class PythonMemoryEnv(gym.Env):
         if return_info:
             return self._get_obs(), self._get_info()
         return self._get_obs()
+    
+    def lives(self):
+        return self.runner.ball.remaining
 
     def step(self, action: Literal[0, 1, 2]):
         self.runner.render_mode = self.render_mode
-        if self.runner.ball.remaining:
+        if self.lives() > 0:
             self.runner.step(self._action_to_direction[action])
             reward = self.runner.score - self.current_score
             self.current_score = self.runner.score
@@ -392,7 +404,7 @@ class PythonMemoryEnv(gym.Env):
         return (
             self._get_obs(),
             reward,
-            self.runner.ball.remaining == 0,
+            self.lives() == 0,
             self._get_info(),
         )
 

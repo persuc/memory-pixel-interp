@@ -1,3 +1,4 @@
+from typing import Callable
 import numpy as np
 import os
 from collections import deque
@@ -80,20 +81,21 @@ class FireResetEnv(gym.Wrapper):
         return self.env.step(ac)
 
 class EpisodicLifeEnv(gym.Wrapper):
-    def __init__(self, env):
+    def __init__(self, env, get_lives: Callable[[gym.Env], int]):
         """Make end-of-life == end-of-episode, but only reset on true game over.
         Done by DeepMind for the DQN and co. since it helps value estimation.
         """
         gym.Wrapper.__init__(self, env)
         self.lives = 0
         self.was_real_done  = True
+        self.get_lives = get_lives
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
         self.was_real_done = done
         # check current lives, make loss of life terminal,
         # then update lives to handle bonus lives
-        lives = self.env.unwrapped.ale.lives()
+        lives = self.get_lives(self.env)
         if lives < self.lives and lives > 0:
             # for Qbert sometimes we stay in lives == 0 condition for a few frames
             # so it's important to keep lives > 0, so that we only reset once
@@ -112,7 +114,7 @@ class EpisodicLifeEnv(gym.Wrapper):
         else:
             # no-op step to advance from terminal/lost life state
             obs, _, _, _ = self.env.step(0)
-        self.lives = self.env.unwrapped.ale.lives()
+        self.lives = self.get_lives(self.env)
         return obs
 
 class MaxAndSkipEnv(gym.Wrapper):

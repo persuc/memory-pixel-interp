@@ -39,6 +39,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module='gym.*')
 
 @dataclass
 class PPOArgs:
+	model_type: ModelType
 	exp_name: str = "PPO_Implementation"
 	seed: int = 1
 	cuda: bool = t.cuda.is_available()
@@ -60,7 +61,7 @@ class PPOArgs:
 	ent_coef: float = 0.01
 	vf_coef: float = 0.5
 	max_grad_norm: float = 0.5
-	model_type: ModelType = ModelType.CLASSIC_CONTROL
+	save_nth_epoch: Optional[Tuple[int, str]] = None # number of epochs, filepath
 
 	def __post_init__(self):
 		self.batch_size = self.num_steps * self.num_envs
@@ -83,7 +84,7 @@ def layer_init(layer: nn.Module, std=np.sqrt(2), bias_const=0.0):
 
 def get_actor_and_critic(
 	envs: gym.vector.SyncVectorEnv,
-	mode: ModelType = ModelType.CLASSIC_CONTROL,
+	mode: ModelType,
 ) -> Tuple[nn.Sequential, nn.Sequential]:
 	'''
 	Returns (actor, critic), the networks used for PPO.
@@ -96,55 +97,52 @@ def get_actor_and_critic(
 		else envs.single_action_space.shape[0]
 	)
 
-	if mode == ModelType.CLASSIC_CONTROL:
+	match mode:
+		case ModelType.CLASSIC_CONTROL | ModelType.CLASSIC_CONTROL_WRAPPED:
+			critic = nn.Sequential(
+				layer_init(nn.Linear(num_obs, 64)),
+				nn.Tanh(),
+				layer_init(nn.Linear(64, 64)),
+				nn.Tanh(),
+				layer_init(nn.Linear(64, 1), std=1.0)
+			)
 
-		critic = nn.Sequential(
-			layer_init(nn.Linear(num_obs, 64)),
-			nn.Tanh(),
-			layer_init(nn.Linear(64, 64)),
-			nn.Tanh(),
-			layer_init(nn.Linear(64, 1), std=1.0)
-		)
-
-		actor = nn.Sequential(
-			layer_init(nn.Linear(num_obs, 64)),
-			nn.Tanh(),
-			layer_init(nn.Linear(64, 64)),
-			nn.Tanh(),
-			layer_init(nn.Linear(64, num_actions), std=0.01)
-		)
-		
-	elif mode == ModelType.CONVOLUTIONAL:
-		assert obs_shape[-1] % 8 == 4
-
-		L_after_convolutions = (obs_shape[-1] // 8) - 3
-		in_features = 64 * L_after_convolutions * L_after_convolutions
-
-		hidden = nn.Sequential(
-			layer_init(nn.Conv2d(4, 32, 8, stride=4, padding=0)),
-			nn.ReLU(),
-			layer_init(nn.Conv2d(32, 64, 4, stride=2, padding=0)),
-			nn.ReLU(),
-			layer_init(nn.Conv2d(64, 64, 3, stride=1, padding=0)),
-			nn.ReLU(),
-			nn.Flatten(),
-			layer_init(nn.Linear(in_features, 512)),
-			nn.ReLU(),
-		)
-		actor = nn.Sequential(
-			hidden,
-			layer_init(nn.Linear(512, num_actions), std=0.01)
-		)
-		critic = nn.Sequential(
-			hidden,
-			layer_init(nn.Linear(512, 1), std=1)
-		)
+			actor = nn.Sequential(
+				layer_init(nn.Linear(num_obs, 64)),
+				nn.Tanh(),
+				layer_init(nn.Linear(64, 64)),
+				nn.Tanh(),
+				layer_init(nn.Linear(64, num_actions), std=0.01)
+			)
+		case ModelType.CONVOLUTIONAL:
 	
-	elif mode == ModelType.SPARSE:
-		raise NotImplementedError("See `mujoco.py`.")
+			assert obs_shape[-1] % 8 == 4
+
+			L_after_convolutions = (obs_shape[-1] // 8) - 3
+			in_features = 64 * L_after_convolutions * L_after_convolutions
+
+			hidden = nn.Sequential(
+				layer_init(nn.Conv2d(4, 32, 8, stride=4, padding=0)),
+				nn.ReLU(),
+				layer_init(nn.Conv2d(32, 64, 4, stride=2, padding=0)),
+				nn.ReLU(),
+				layer_init(nn.Conv2d(64, 64, 3, stride=1, padding=0)),
+				nn.ReLU(),
+				nn.Flatten(),
+				layer_init(nn.Linear(in_features, 512)),
+				nn.ReLU(),
+			)
+			actor = nn.Sequential(
+				hidden,
+				layer_init(nn.Linear(512, num_actions), std=0.01)
+			)
+			critic = nn.Sequential(
+				hidden,
+				layer_init(nn.Linear(512, 1), std=1)
+			)
 	
-	else:
-		raise ValueError(f"Unknown mode {mode}")
+		case ModelType.SPARSE:
+			raise NotImplementedError("See `mujoco.py`.")
 
 	return actor.to(device), critic.to(device)
 
@@ -213,7 +211,6 @@ def compute_advantages(
 
   advantages = (discount_factors_shifted * deltas_masked).sum(dim=1)
   return advantages
-	
 
 
 def minibatch_indexes(rng: Generator, batch_size: int, minibatch_size: int) -> List[np.ndarray]:
@@ -372,28 +369,15 @@ class PPOAgent(nn.Module):
 		'''
 		Carries out a single interaction step between the agent and the environment, and adds results to the replay memory.
 		'''
-		# SOLUTION
 		# Get newest observations
 		obs = self.next_obs
 		dones = self.next_done
-		
 		# Compute logits based on newest observation, and use it to get an action distribution we sample from
 		with t.inference_mode():
 			logits = self.actor(obs)
 		probs = Categorical(logits=logits)
 		actions = probs.sample()
-		
 		# Step environment based on the sampled action
-
-		# np_actions = actions.cpu().numpy()
-		# fifteen_step_by_radiohead = [e.step(np_actions[i]) for i, e in enumerate(self.envs.envs)]
-		# state_sizes = [len(s[0]) for s in fifteen_step_by_radiohead]
-		# if not all([state_sizes[0] == state_sizes[i] for i in range(len(state_sizes))]):
-		# 	print(state_sizes)
-		# 	raise RuntimeError(f"not all state sizes match! Got {set(state_sizes)}")
-		# for size in state_sizes
-		# size = state_sizes[0]
-		# print(size)
 		next_obs, rewards, next_dones, infos = self.envs.step(actions.cpu().numpy())
 
 		# Calculate logprobs and values, and add this all to replay memory
@@ -511,15 +495,29 @@ def make_optimizer(agent: PPOAgent, total_training_steps: int, initial_lr: float
 # 3️⃣ TRAINING LOOP
 
 class PPOTrainer:
+	max_reward_earned: Optional[int]
 
-	def __init__(self, args: PPOArgs):
+	def __init__(self, args: PPOArgs, agent: Optional[PPOAgent] = None):
+		"""
+			Agent will be created if None. If not none, training will resume with agent as is.
+		"""
 		set_global_seeds(args.seed)
 		self.args = args
 		self.run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
 		made_envs = [make_env(args.env_id, args.seed + i, i, args.capture_video, self.run_name, args.model_type) for i in range(args.num_envs)]
 		self.envs = gym.vector.SyncVectorEnv(made_envs)
-		self.agent = PPOAgent(self.args, self.envs).to(device)
+		if agent is None:
+			self.agent = PPOAgent(self.args, self.envs).to(device)
+		else:
+			reference_agent = PPOAgent(self.args, self.envs).to(device)
+			self.agent = agent.to(device)
+			param_shapes = zip(self.agent.parameters(), reference_agent.parameters())
+			for agent_param, reference_param in param_shapes:
+				if agent_param.shape != reference_param.shape:
+					print(f"Provided agent has incorrect shape.\nGot:{list(agent.parameters())}\nExpected:{list(reference_agent.parameters())}")
 		self.optimizer, self.scheduler = make_optimizer(self.agent, self.args.total_training_steps, self.args.learning_rate, 0.0)
+		self.epoch = 0
+		self.max_reward_earned = None # TODO: implement max reward seen thus far
 		if args.use_wandb: wandb.init(
 			project=args.wandb_project_name,
 			entity=args.wandb_entity,
@@ -533,9 +531,11 @@ class PPOTrainer:
 		to step through the environment. It also returns the episode length of the most recently terminated
 		episode (used in the progress bar readout).
 		'''
-		# SOLUTION
 		last_episode_len = None
-		for step in range(self.args.num_steps):
+
+		self.envs.seed(self.epoch)
+
+		for _step in range(self.args.num_steps):
 			infos = self.agent.play_step()
 			for info in infos:
 				if "episode" in info.keys():
@@ -556,7 +556,6 @@ class PPOTrainer:
 			- Clips the gradients (see detail #11)
 			- Steps the learning rate scheduler
 		'''
-		# SOLUTION
 		minibatches = self.agent.get_minibatches()
 		for minibatch in minibatches:
 			objective_fn = self.compute_ppo_objective(minibatch)
@@ -570,7 +569,6 @@ class PPOTrainer:
 		'''
 		Handles learning phase for a single minibatch. Returns objective function to be maximized.
 		'''
-		# SOLUTION
 		logits = self.agent.actor(minibatch.observations)
 		probs = Categorical(logits=logits)
 		values = self.agent.critic(minibatch.observations).squeeze()
@@ -599,27 +597,35 @@ class PPOTrainer:
 		), step=self.agent.steps)
 
 		return total_objective_function
-
-def train(args: PPOArgs) -> PPOAgent:
-	'''Implements training loop, used like: agent = train(args)'''
-
-	trainer = PPOTrainer(args)
-
-	progress_bar = tqdm(range(args.total_phases))
-
-	for epoch in progress_bar:
-
-		last_episode_len = trainer.rollout_phase()
-		if last_episode_len is not None:
-			progress_bar.set_description(f"Epoch {epoch:02}, Episode length: {last_episode_len}")
-
-		trainer.learning_phase()
 	
-	trainer.envs.close()
-	if args.use_wandb:
-		wandb.finish()
+	def train(self) -> PPOAgent:
+		'''Implements training loop, used like: agent = train(args)'''
 
-	return trainer.agent
+		progress_bar = tqdm(range(args.total_phases))
+
+		for epoch in progress_bar:
+			self.epoch += 1
+
+			last_episode_len = self.rollout_phase()
+			if last_episode_len is not None:
+				progress_bar.set_description(f"Epoch {epoch:02}, Episode length: {last_episode_len}")
+
+			self.learning_phase()
+
+			if self.args.save_nth_epoch is not None and self.epoch % self.args.save_nth_epoch[0] == 0:
+				t.save({
+						"epoch": epoch,
+						"model_state_dict": self.agent.state_dict(),
+						"optimizer_state_dict": self.optimizer.state_dict(),
+						# TODO save loss history "train_loss_history": self.loss_history,
+				}, self.args.save_nth_epoch[1])
+		
+		self.envs.close()
+		if args.use_wandb:
+			wandb.finish()
+
+		return self.agent
+	
 
 
 # if MAIN and ("CartPole" in RUN_TRAINING):
@@ -665,7 +671,6 @@ def train(args: PPOArgs) -> PPOAgent:
 # 		reward = rotation_speed_reward - 0.5 * stability_penalty
 
 # 		return (obs, reward, done, info)
-		
 # # %%
 
 # if MAIN and ("SpinCart" in RUN_TRAINING):
@@ -690,11 +695,15 @@ gym.envs.registration.register(id="pythonmemory/Breakout-v0", entry_point=Python
 
 args = PPOArgs(
   env_id = "pythonmemory/Breakout-v0",
+	exp_name = "PythonMemoryBreakout",
   wandb_project_name = "PythonMemoryBreakout",
   use_wandb = True,
-  model_type=ModelType.CLASSIC_CONTROL,
+  model_type=ModelType.CLASSIC_CONTROL_WRAPPED,
   clip_coef = 0.1,
   num_envs = 8,
+	save_nth_epoch=(20, "PythonMemory.pt")
 )
 
-agent = train(args)
+trainer = PPOTrainer(args)
+
+agent = trainer.train()
