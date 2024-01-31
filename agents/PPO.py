@@ -46,7 +46,7 @@ class PPOArgs:
 	log_dir: str = "logs"
 	use_wandb: bool = False
 	wandb_project_name: str = "PPOCart"
-	wandb_entity: str = None
+	wandb_entity: Optional[str] = None
 	capture_video: bool = True
 	env_id: str = "CartPole-v1"
 	total_timesteps: int = 500_000
@@ -545,6 +545,16 @@ class PPOTrainer:
 						"episode_length": episode_len,
 						"episode_return": episode_return,
 					}, step=self.agent.steps)
+		
+		# TODO: debug framy video where potentially env.step() is called more often than env.render()
+		# runners: list[PythonMemoryRunner] = [e.unwrapped.runner for e in self.agent.envs.envs]
+		# renders = [runner.renders for runner in runners]
+		# steps = [runner.steps for runner in runners]
+		# zipped = zip(renders, steps)
+		# if not all([z[0] == z[1] for z in zipped]):
+		# 	print(zipped)
+		# 	raise Exception(f"Runner did not run steps equal to number of renders\n {zipped}")
+
 		return (sum(episode_lengths) / len(episode_lengths)) if episode_lengths else None
 
 	def learning_phase(self) -> None:

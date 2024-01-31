@@ -142,6 +142,8 @@ class Runner:
     def __init__(self, render_mode: Literal["human", "rgb_array", None]):
         self.render_mode = render_mode
         self.rng = np.random.default_rng()
+        self.steps = 0
+        self.renders = 0
 
         pygame.init()
         if self.render_mode is not None:
@@ -221,8 +223,10 @@ class Runner:
 
 
     def game(self, colO, colR) -> None:
+        self.steps += 1
         if self.render_mode == "human":
             do_render(self.screen, self.colors, self.row_colors, self.board, self.ball, self.paddle, self.wall1, self.wall2, self.wall3, self.score, self.fontObj)
+            self.renders += 1
 
         # check all the collisions-------------------------
         if self.ball.adjusted == False:
@@ -433,6 +437,7 @@ class PythonMemoryEnv(gym.Env):
             raise Exception(f"Requested rgb_array but environment was initialized with render_mode={self.render_mode}")
         screen = pygame.Surface((self.runner.screen_width, self.runner.screen_height))
         do_render(screen, self.runner.colors, self.runner.row_colors, self.runner.board, self.runner.ball, self.runner.paddle, self.runner.wall1, self.runner.wall2, self.runner.wall3)
+        self.runner.renders += 1
         return np.transpose(
             np.array(pygame.surfarray.pixels3d(screen)).copy(), axes=(1, 0, 2)
         )
@@ -456,7 +461,7 @@ if __name__ == "__main__":
                     runner.paddle.direction = "left"
                 if event.key == pygame.K_RIGHT:
                     runner.paddle.direction = "right"
-                if event.key == pygame.K_SPACE:
+                if paused and event.key == pygame.K_SPACE:
                     runner.step(runner.paddle.direction)
             elif event.type == pygame.KEYUP:
                 if event.key == pygame.K_LEFT:
