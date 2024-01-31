@@ -66,7 +66,8 @@ class Ball:  # class for ball vars
         self.yPos = 1
         self.adjusted = False
         self.speed = 5
-        self.collisions, self.speed = 0, 5
+        self.collisions = 0
+        self.speed = 5
         self.alive = True
 
 
@@ -134,6 +135,7 @@ class Runner:
     board_height = 6
     screen_width = 640
     screen_height = 480
+    play_width: int
     lives = 3
     rng: np.random.Generator
 
@@ -176,9 +178,11 @@ class Runner:
             ]
 
         # world objects
-        self.wall1 = pygame.Rect(20, 100, 30, 380)
-        self.wall2 = pygame.Rect(590, 100, 30, 380)
-        self.wall3 = pygame.Rect(20, 80, 600, 30)
+        self.wall1 = pygame.Rect(20, 100, 30, 380) # left
+        self.wall2 = pygame.Rect(590, 100, 30, 380) # right
+        self.wall3 = pygame.Rect(20, 80, 600, 30) # top
+
+        self.play_width = self.wall2.left - (self.wall1.left + self.wall1.width)
 
         self.reset()
 
@@ -346,20 +350,21 @@ class PythonMemoryEnv(gym.Env):
     spec: EnvSpec
     state_size: int
     render_mode: Literal["human", "rgb_array", None]
+    paddle_collision_reward = 0.25
+    distance_reward_coef = 0.01
 
     def __init__(self, render_mode=None):
         assert render_mode is None or render_mode in self.metadata["render_modes"], f"render_mode must be None, \"human\", or \"rgb_array\""
         self.render_mode = render_mode
         self.runner = Runner(render_mode=self.render_mode)
         self.runner.reset()
-        self.current_score = 0
 
         self.state_size = len(self.runner.get_memory())
         # board_size = self.runner.board_width * self.runner.board_height
         
-        max_reward = self.runner.board_width * 2 * 1 + self.runner.board_width * 2 * 4 + self.runner.board_width * 2 * 7
+        max_reward = self.runner.board_width * 2 * 1 + self.runner.board_width * 2 * 2 + self.runner.board_width * 2 * 3
 
-        self.spec = EnvSpec(id_requested=self.env, entry_point='environments.python_breakout:PythonMemoryEnv', reward_threshold=max_reward, max_episode_steps=300)
+        self.spec = EnvSpec(id_requested=self.env, entry_point='environments.python_breakout:PythonMemoryEnv', reward_threshold=max_reward, max_episode_steps=600)
         
         self.observation_space = spaces.MultiBinary(self.state_size)
         
@@ -383,9 +388,6 @@ class PythonMemoryEnv(gym.Env):
         return self.runner.get_memory()
 
     def _get_info(self):
-        # TODO: use same format as play_step
-        # last_episode_len = info["episode"]["l"]
-        # last_episode_return = info["episode"]["r"]
         return {}
     
     def seed(self, seed: int) -> None:
@@ -393,7 +395,6 @@ class PythonMemoryEnv(gym.Env):
 
     def reset(self, seed=None, options=None, return_info: bool = False) -> Union[list[bool], Tuple[list[bool], dict]]:
         self.runner.reset()
-        self.current_score = self.runner.score
         if return_info:
             return self._get_obs(), self._get_info()
         return self._get_obs()
@@ -404,16 +405,24 @@ class PythonMemoryEnv(gym.Env):
     def step(self, action: Literal[0, 1, 2]):
         self.runner.render_mode = self.render_mode
         if self.lives() > 0:
+            prev_collisions = self.runner.ball.collisions
+            prev_score = self.runner.score
+            prev_lives = self.lives()
             self.runner.step(self._action_to_direction[action])
-            reward = self.runner.score - self.current_score
+            reward = self.runner.score - prev_score
+            if prev_collisions < self.runner.ball.collisions:
+                reward += self.paddle_collision_reward
+            elif prev_lives > self.lives():
+                reward += self.distance_reward_coef * (1 - abs(self.runner.paddle.x - self.runner.ball.x) / self.runner.play_width)
             self.current_score = self.runner.score
+            
         else:
             reward = 0
         # obs, reward, done, info
         return (
             self._get_obs(),
             reward,
-            self.lives() == 0,
+            self.lives() <= 0,
             self._get_info(),
         )
 

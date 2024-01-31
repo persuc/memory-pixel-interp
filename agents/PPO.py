@@ -525,13 +525,13 @@ class PPOTrainer:
 			monitor_gym=args.capture_video
 		)
 
-	def rollout_phase(self) -> Optional[int]:
+	def rollout_phase(self) -> Optional[float]:
 		'''
 		This function populates the memory with a new set of experiences, using `self.agent.play_step`
 		to step through the environment. It also returns the episode length of the most recently terminated
 		episode (used in the progress bar readout).
 		'''
-		last_episode_len = None
+		episode_lengths = []
 
 		self.envs.seed(self.epoch)
 
@@ -539,13 +539,13 @@ class PPOTrainer:
 			infos = self.agent.play_step()
 			for info in infos:
 				if "episode" in info.keys():
-					last_episode_len = info["episode"]["l"]
-					last_episode_return = info["episode"]["r"]
+					episode_len = info["episode"]["l"]
+					episode_return = info["episode"]["r"]
 					if self.args.use_wandb: wandb.log({
-						"episode_length": last_episode_len,
-						"episode_return": last_episode_return,
+						"episode_length": episode_len,
+						"episode_return": episode_return,
 					}, step=self.agent.steps)
-		return last_episode_len
+		return (sum(episode_lengths) / len(episode_lengths)) if episode_lengths else None
 
 	def learning_phase(self) -> None:
 		'''
@@ -606,9 +606,9 @@ class PPOTrainer:
 		for epoch in progress_bar:
 			self.epoch += 1
 
-			last_episode_len = self.rollout_phase()
-			if last_episode_len is not None:
-				progress_bar.set_description(f"Epoch {epoch:02}, Episode length: {last_episode_len}")
+			avg_episode_len = self.rollout_phase()
+			if avg_episode_len is not None:
+				progress_bar.set_description(f"Epoch {epoch:02}, Avg Episode Length: {avg_episode_len}")
 
 			self.learning_phase()
 
@@ -617,8 +617,7 @@ class PPOTrainer:
 						"epoch": epoch,
 						"model_state_dict": self.agent.state_dict(),
 						"optimizer_state_dict": self.optimizer.state_dict(),
-						# TODO save loss history "train_loss_history": self.loss_history,
-				}, self.args.save_nth_epoch[1])
+				}, f"{self.args.save_nth_epoch[1]}-Epoch{self.epoch}.pt")
 		
 		self.envs.close()
 		if args.use_wandb:
@@ -701,7 +700,7 @@ args = PPOArgs(
   model_type=ModelType.CLASSIC_CONTROL_WRAPPED,
   clip_coef = 0.1,
   num_envs = 8,
-	save_nth_epoch=(20, "PythonMemory.pt")
+	save_nth_epoch=(20, "PythonMemory")
 )
 
 trainer = PPOTrainer(args)
