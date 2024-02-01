@@ -93,25 +93,6 @@ def make_env(args: PPOArgs, seed: int, idx: int, run_name: str):
     
     return thunk
 
-def wrap_memory_env(env: gym.Env):
-    env = NoopResetEnv(env, noop_max=30)
-    env = MaxAndSkipEnv(env, skip=4)
-    env = EpisodicLifeEnv(env, lambda env: env.unwrapped.lives())
-    env = ClipRewardEnv(env)
-    # TODO: fix framestack for MultiBinary obs space
-    env = FrameStack(env, num_stack=4)
-    return env
-
-def wrap_pixels_env(env: gym.Env):
-    env = NoopResetEnv(env, noop_max=30)
-    env = MaxAndSkipEnv(env, skip=4)
-    env = EpisodicLifeEnv(env, lambda env: env.unwrapped.lives())
-    env = ClipRewardEnv(env)
-    env = ResizeObservation(env, shape=(84, 84))
-    env = GrayScaleObservation(env)
-    env = FrameStack(env, num_stack=4)
-    return env
-
 # def wrap_atari_env(env: gym.Env):
 #     env = NoopResetEnv(env, noop_max=30)
 #     env = MaxAndSkipEnv(env, skip=4)

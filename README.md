@@ -8,6 +8,7 @@ If you already cloned the repo but need to clone the submodules:
 
 Install deps:
 `pip install -r requirements.txt`
+`pip install "gym[accept-rom-license, atari]"`
 
 Or make a virtual env:
 `python -m venv env && source ./env/bin/activate && pip install -r requirements.txt`

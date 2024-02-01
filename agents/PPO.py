@@ -7,7 +7,6 @@ import torch as t
 from torch import Tensor
 from torch.optim.optimizer import Optimizer
 import gym
-from gym.envs.classic_control.cartpole import CartPoleEnv
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
@@ -21,13 +20,7 @@ import sys
 sys.path.append(str(Path.cwd()))
 import main
 
-from PPO_utils import PPOArgs, make_env, set_global_seeds, wrap_memory_env, wrap_pixels_env, wrap_atari_memory_env, wrap_atari_pixels_env
-from environments.python_breakout import PythonMemoryEnv, PythonPixelsEnv
-from utils.plotly_utils import plot_cartpole_obs_and_dones
-
-# If we don't want to run all the training code, this is useful
-# RUN_TRAINING = ["CartPole", "EasyCart", "SpinCart", "Breakout"]
-RUN_TRAINING = ["PythonBreakout"]
+from PPO_utils import PPOArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env
 
 Arr = np.ndarray
 
@@ -80,8 +73,10 @@ def get_actor_and_critic(
 				layer_init(nn.Linear(64, num_actions), std=0.01)
 			)
 		case "convolutional":
+
+			# for atari RAM, obs is (4, 32, 128)
 	
-			assert obs_shape[-1] % 8 == 4
+			assert obs_shape[-1] % 8 == 4, f"Expected obs.shape[-1] ≡ 4 % 8. Got shape: {obs_shape} ({obs_shape[-1]} % 8 = {obs_shape[-1] % 8})"
 
 			L_after_convolutions = (obs_shape[-1] // 8) - 3
 			in_features = 64 * L_after_convolutions * L_after_convolutions
@@ -602,108 +597,14 @@ class PPOTrainer:
 			wandb.finish()
 
 		return self.agent
-	
-
-
-# if MAIN and ("CartPole" in RUN_TRAINING):
-# 	args = PPOArgs(use_wandb=True)
-# 	agent = train(args)
-
-# from gym.envs.classic_control.cartpole import CartPoleEnv
-
-# class EasyCart(CartPoleEnv):
-# 	def step(self, action):
-# 		(obs, rew, done, info) = super().step(action)
-# 		x, v, theta, omega = obs
-
-# 		# First reward: angle should be close to zero
-# 		rew_1 = 1 - abs(theta / 0.2095)
-# 		# Second reward: position should be close to the center
-# 		rew_2 = 1 - abs(x / 2.4)
-
-# 		rew_new = (rew_1 + rew_2) / 2
-
-# 		return (obs, rew_new, done, info)
-
-# # %%
-
-# if MAIN and ("EasyCart" in RUN_TRAINING):
-# 	gym.envs.registration.register(id="EasyCart-v0", entry_point=EasyCart, max_episode_steps=500)
-# 	args = PPOArgs(env_id="EasyCart-v0", use_wandb=True)
-# 	agent = train(args)
-
-# # %%
-
-# class SpinCart(CartPoleEnv):
-
-# 	def step(self, action):
-# 		obs, rew, done, info = super().step(action)
-# 		# YOUR CODE HERE
-# 		x, v, theta, omega = obs
-# 		# Allow for 360-degree rotation, but not for going off the edge of the map
-# 		done = (abs(x) > self.x_threshold)
-# 		# Reward function incentivises fast spinning while staying still & near centre
-# 		rotation_speed_reward = min(1, 0.1*abs(omega))
-# 		stability_penalty = max(1, abs(x/2.5) + abs(v/10))
-# 		reward = rotation_speed_reward - 0.5 * stability_penalty
-
-# 		return (obs, reward, done, info)
-# # %%
-
-# if MAIN and ("SpinCart" in RUN_TRAINING):
-# 	gym.envs.registration.register(id="SpinCart-v0", entry_point=SpinCart, max_episode_steps=500)
-# 	args = PPOArgs(env_id="SpinCart-v0", use_wandb=True)
-# 	agent = train(args)
-
-
-def train_memory():
-	id = "pythonmemory/Breakout-v0"
-	name = "PythonMemoryBreakout"
-	gym.envs.registration.register(id=id, entry_point=PythonMemoryEnv, max_episode_steps=500, kwargs={"render_mode": "rgb_array"})
-	args = PPOArgs(
-		env_id = id,
-		model_type="classic_control",
-		exp_name = name,
-		wandb_project_name = name,
-		clip_coef = 0.1,
-		num_envs = 8,
-		episodes_per_video=20,
-		save_nth_epoch=(20, name),
-		wrap_env=wrap_memory_env,
-	)
-
-	trainer = PPOTrainer(args)
-
-	return trainer.train()
-
-
-def train_pixels():
-	id = "pythonpixels/Breakout-v0"
-	name = "PythonPixelsBreakout"
-	gym.envs.registration.register(id=id, entry_point=PythonPixelsEnv, max_episode_steps=500, kwargs={"render_mode": "rgb_array"})
-	args = PPOArgs(
-		env_id = id,
-		exp_name = name,
-		model_type="convolutional",
-		wandb_project_name = name,
-		clip_coef = 0.1,
-		num_envs = 8,
-		episodes_per_video=20,
-		save_nth_epoch=(20, name),
-		wrap_env=wrap_pixels_env,
-	)
-
-	trainer = PPOTrainer(args)
-
-	return trainer.train()
 
 def train_gym_memory():
 	name = "PPOMemory"
 	args = PPOArgs(
 		env_id = "ALE/Breakout-v5",
 		exp_name = name,
-		model_type="classic_control",
-		wandb_project_name = name,
+		model_type="convolutional",
+		# wandb_project_name = name,
 		clip_coef = 0.1,
 		num_envs = 8,
 		episodes_per_video=20,
