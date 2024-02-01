@@ -25,7 +25,6 @@ from atari_wrappers import (
 )
 from gym.wrappers.frame_stack import FrameStack
 from gym.wrappers.resize_observation import ResizeObservation
-from gym.wrappers.gray_scale_observation import GrayScaleObservation
 from gym.wrappers.record_episode_statistics import RecordEpisodeStatistics
 from gym.wrappers.record_video import RecordVideo
 from gym.wrappers.clip_action import ClipAction
@@ -59,7 +58,7 @@ class PPOArgs:
     ent_coef: float = 0.01
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
-    save_nth_epoch: Optional[Tuple[int, str]] = None # number of epochs, filepath
+    save_nth_epoch: Optional[int] = None
     wrap_env: Optional[Callable[[gym.Env], gym.Env]] = None # function that adds wrappers to env
     make_kwargs: dict = field(default_factory=dict)
 
@@ -81,7 +80,7 @@ def make_env(args: PPOArgs, seed: int, idx: int, run_name: str):
             if idx == 0:
                 env = RecordVideo(
                     env, 
-                    f"videos/{run_name}", 
+                    f"videos/{run_name}",
                     episode_trigger = lambda x : x % args.episodes_per_video == 0
                 )
 
@@ -107,7 +106,7 @@ def make_env(args: PPOArgs, seed: int, idx: int, run_name: str):
 #     env = FrameStack(env, num_stack=4)
 #     return env
 
-def wrap_atari_env(env: gym.Env):
+def wrap_atari_env(env: gym.Env) -> gym.Env:
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
     env = EpisodicLifeEnv(env, lambda env: env.unwrapped.ale.lives())
@@ -116,12 +115,12 @@ def wrap_atari_env(env: gym.Env):
     env = ClipRewardEnv(env)
     return env
 
-def wrap_atari_memory_env(env: gym.Env):
+def wrap_atari_memory_env(env: gym.Env) -> gym.Env:
     env = wrap_atari_env(env)
     env = FrameStack(env, num_stack=4)
     return env
 
-def wrap_atari_pixels_env(env: gym.Env):
+def wrap_atari_pixels_env(env: gym.Env) -> gym.Env:
     env = wrap_atari_env(env)
     env = ResizeObservation(env, shape=(84, 84))
     env = FrameStack(env, num_stack=4)

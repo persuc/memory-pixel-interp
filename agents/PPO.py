@@ -1,3 +1,4 @@
+import os
 import time
 from dataclasses import dataclass
 from tqdm import tqdm
@@ -11,18 +12,20 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
 import einops
-from typing import List, Tuple, Literal, Union, Optional
+from typing import Any, Dict, List, Tuple, TypeVar, Union, Optional
 from jaxtyping import Float, Int
 import wandb
-
-from pathlib import Path
-import sys
-sys.path.append(str(Path.cwd()))
-import main
 
 from PPO_utils import ModelType, PPOArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env
 
 Arr = np.ndarray
+
+from typing import TypedDict
+
+class StateType(TypedDict):
+	epoch: int
+	model_state_dict: Dict[str, Any]
+	optimizer_state_dict: Dict[str, Any]
 
 device = t.device("cuda" if t.cuda.is_available() else "cpu")
 
@@ -41,7 +44,7 @@ def layer_init(layer: nn.Module, std=np.sqrt(2), bias_const=0.0):
 def get_actor_and_critic(
 	envs: gym.vector.SyncVectorEnv,
 	mode: ModelType,
-) -> Tuple[nn.Sequential, nn.Sequential]:
+) -> Tuple[nn.Sequential, nn.Sequential, Optional[nn.Sequential]]:
 	'''
 	Returns (actor, critic), the networks used for PPO.
 	'''
@@ -109,7 +112,7 @@ def get_actor_and_critic(
 				layer_init(nn.Linear(64, 64)),
 				nn.ReLU(),
 			)
-			 
+
 			critic = nn.Sequential(
 				shared,
 				layer_init(nn.Linear(64, 1), std=1.0)
@@ -119,6 +122,7 @@ def get_actor_and_critic(
 				shared,
 				layer_init(nn.Linear(64, num_actions), std=0.01)
 			)
+			return actor.to(device), critic.to(device), shared.to(device)
 	
 		case "sparse":
 			raise NotImplementedError("See `mujoco.py`.")
@@ -126,7 +130,7 @@ def get_actor_and_critic(
 		case _:
 			raise NotImplementedError(f"Mode not recognised: {mode}")
 
-	return actor.to(device), critic.to(device)
+	return actor.to(device), critic.to(device), None
 
 
 def shift_rows(arr: Tensor):
@@ -337,7 +341,17 @@ class PPOAgent(nn.Module):
 		self.steps = 0
 
 		# Get actor and critic networks
-		self.actor, self.critic = get_actor_and_critic(envs, mode=args.model_type)
+		self.actor, self.critic, shared = get_actor_and_critic(envs, mode=args.model_type)
+
+		if args.model_type == "shared_control":
+			def hook(module: nn.Module, inputs: List[t.Tensor], output: t.Tensor) -> None:
+					if self.steps % 100 == 0:
+						wandb.log({
+								"output_std": output.std(),
+								"output_max": output.max(),
+							}, step=self.steps)
+
+			shared.register_forward_hook(hook)
 
 		# Define our first (obs, done), so we can start adding experiences to our replay memory
 		self.next_obs = t.tensor(envs.reset()).to(device, dtype=t.float)
@@ -479,27 +493,22 @@ def make_optimizer(agent: PPOAgent, total_training_steps: int, initial_lr: float
 class PPOTrainer:
 	max_reward_earned: Optional[int]
 
-	def __init__(self, args: PPOArgs, agent: Optional[PPOAgent] = None):
+	def __init__(self, args: PPOArgs, agent_path: Optional[str] = None):
 		"""
 			Agent will be created if None. If not none, training will resume with agent as is.
 		"""
 		set_global_seeds(args.seed)
 		self.args = args
-		self.run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
+		self.start_time = int(time.time())
+		self.run_name = f"{args.env_id}__{args.exp_name}__{self.start_time}".replace("/", "-")
 		made_envs = [make_env(args, args.seed + i, i, self.run_name) for i in range(args.num_envs)]
 		self.envs = gym.vector.SyncVectorEnv(made_envs)
-		if agent is None:
-			self.agent = PPOAgent(args, self.envs).to(device)
-		else:
-			self.agent = agent.to(device)
-			reference_agent = PPOAgent(args, self.envs).to(device)
-			param_shapes = zip(self.agent.parameters(), reference_agent.parameters())
-			for agent_param, reference_param in param_shapes:
-				if agent_param.shape != reference_param.shape:
-					print(f"Provided agent has incorrect shape.\nGot:{list(agent.parameters())}\nExpected:{list(reference_agent.parameters())}")
+		self.agent = PPOAgent(args, self.envs).to(device)
 		self.optimizer, self.scheduler = make_optimizer(self.agent, args.total_training_steps, args.learning_rate, 0.0)
 		self.epoch = 0
 		self.max_reward_earned = None # TODO: implement max reward seen thus far
+		if agent_path is not None:
+			self.load_agent(agent_path)
 		if args.wandb_project_name is not None: wandb.init(
 			project=args.wandb_project_name,
 			entity=args.wandb_entity,
@@ -507,19 +516,25 @@ class PPOTrainer:
 			monitor_gym=args.episodes_per_video is not None
 		)
 
-	def rollout_phase(self) -> Optional[float]:
+	def rollout_phase(self) -> Tuple[Optional[float], Optional[float]]:
 		'''
 		This function populates the memory with a new set of experiences, using `self.agent.play_step`
 		to step through the environment. It also returns the episode length of the most recently terminated
 		episode (used in the progress bar readout).
 		'''
 		episode_lengths = []
+		episode_steps = []
 
-		self.envs.seed(self.epoch)
+		# all_keys = set()
 
 		for _step in range(self.args.num_steps):
 			infos = self.agent.play_step()
 			for info in infos:
+			# 	for key in info.keys():
+			# 		all_keys.add(key)
+			# 		if isinstance(info[key], dict):
+			# 			for key2 in info[key].keys():
+			# 				all_keys.add(f"{key}/{key2}")
 				if "episode" in info.keys():
 					episode_len = info["episode"]["l"]
 					episode_return = info["episode"]["r"]
@@ -528,17 +543,13 @@ class PPOTrainer:
 						"episode_return": episode_return,
 					}, step=self.agent.steps)
 					episode_lengths.append(episode_len)
+				if "episode_frame_number" in info.keys():
+					episode_steps.append(info["episode_frame_number"] / 16)
 		
-		# TODO: debug framy video where potentially env.step() is called more often than env.render()
-		# runners: list[PythonMemoryRunner] = [e.unwrapped.runner for e in self.agent.envs.envs]
-		# renders = [runner.renders for runner in runners]
-		# steps = [runner.steps for runner in runners]
-		# zipped = zip(renders, steps)
-		# if not all([z[0] == z[1] for z in zipped]):
-		# 	print(zipped)
-		# 	raise Exception(f"Runner did not run steps equal to number of renders\n {zipped}")
+		def avg(l: list[int]) -> float | None:
+			return (sum(l) / len(l)) if l else None
 
-		return (sum(episode_lengths) / len(episode_lengths)) if episode_lengths else None
+		return avg(episode_lengths), avg(episode_steps)
 
 	def learning_phase(self) -> None:
 		'''
@@ -596,43 +607,62 @@ class PPOTrainer:
 
 		progress_bar = tqdm(range(self.args.total_phases))
 
+		avg_episode_len = 0
+		avg_episode_steps = 0
+
 		for epoch in progress_bar:
 			self.epoch += 1
 
-			avg_episode_len = self.rollout_phase()
-			progress_bar.set_description(f"Epoch {epoch:02}" + f", Avg Episode Length: {avg_episode_len:.2f}" if avg_episode_len is not None else "")
+			new_avg_episode_len, new_avg_episode_steps = self.rollout_phase()
+			if new_avg_episode_len is not None:
+				avg_episode_len = new_avg_episode_len
+			if new_avg_episode_steps is not None:
+				avg_episode_steps = new_avg_episode_steps
+			progress_bar.set_description(f"Epoch {epoch:02}, Avg Episode Length: {avg_episode_len:.2f}, Avg Episode Steps: {avg_episode_steps:.2f}")
 
 			self.learning_phase()
 
-			if self.args.save_nth_epoch is not None and self.epoch % self.args.save_nth_epoch[0] == 0:
-				t.save({
+			if self.args.save_nth_epoch is not None and self.epoch % self.args.save_nth_epoch == 0:
+				state: StateType = {
 						"epoch": epoch,
 						"model_state_dict": self.agent.state_dict(),
 						"optimizer_state_dict": self.optimizer.state_dict(),
-				}, f"{self.args.save_nth_epoch[1]}-Epoch{self.epoch}.pt")
+				}
+				filepath = f"states/{self.run_name}/Epoch-{self.epoch}.pt"
+				os.makedirs(os.path.dirname(filepath), exist_ok=True)
+				t.save(state, filepath)
 		
 		self.envs.close()
 		if self.args.wandb_project_name is not None:
 			wandb.finish()
 
 		return self.agent
+	
+	
+	def load_agent(self, path: str):
+		state: StateType = t.load(path)
+		self.agent.load_state_dict(state["model_state_dict"])
+		self.optimizer.load_state_dict(state["optimizer_state_dict"])
+		self.epoch = state["epoch"]
 
-def train_gym_memory():
+def train_gym_memory(agent_path: Optional[str] = None):
 	name = "PPOMemory"
 	args = PPOArgs(
 		env_id = "ALE/Breakout-v5",
 		exp_name = name,
 		model_type="shared_control",
-		# wandb_project_name = name,
+		wandb_project_name = name,
+		total_timesteps=500_000,
 		clip_coef = 0.1,
 		num_envs = 8,
+		num_steps=128,
 		episodes_per_video=20,
 		make_kwargs={"obs_type": "ram"},
-		save_nth_epoch=(50, name),
+		save_nth_epoch=50,
 		wrap_env=wrap_atari_memory_env,
 	)
 
-	trainer = PPOTrainer(args)
+	trainer = PPOTrainer(args, agent_path)
 	return trainer.train()
 
 def train_gym_pixels():
@@ -646,7 +676,7 @@ def train_gym_pixels():
 		num_envs = 8,
 		episodes_per_video=20,
 		make_kwargs={"obs_type": "grayscale"},
-		save_nth_epoch=(50, name),
+		save_nth_epoch=50,
 		wrap_env=wrap_atari_pixels_env,
 	)
 
@@ -656,5 +686,7 @@ def train_gym_pixels():
 if __name__ == "__main__":
 	# train_memory()
 	# train_pixels()
+
+	# train_gym_memory("PPOMemory-Epoch450.pt")
 	train_gym_memory()
 	# train_gym_pixels()
