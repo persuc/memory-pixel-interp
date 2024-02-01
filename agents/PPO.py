@@ -20,7 +20,7 @@ import sys
 sys.path.append(str(Path.cwd()))
 import main
 
-from PPO_utils import PPOArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env
+from PPO_utils import ModelType, PPOArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env
 
 Arr = np.ndarray
 
@@ -40,7 +40,7 @@ def layer_init(layer: nn.Module, std=np.sqrt(2), bias_const=0.0):
 
 def get_actor_and_critic(
 	envs: gym.vector.SyncVectorEnv,
-	mode: Literal["classic_control", "convolutional", "sparse"],
+	mode: ModelType,
 ) -> Tuple[nn.Sequential, nn.Sequential]:
 	'''
 	Returns (actor, critic), the networks used for PPO.
@@ -99,6 +99,25 @@ def get_actor_and_critic(
 			critic = nn.Sequential(
 				hidden,
 				layer_init(nn.Linear(512, 1), std=1)
+			)
+
+		case "shared_control":
+			shared = nn.Sequential(
+				nn.Flatten(),
+				layer_init(nn.Linear(num_obs, 64)),
+				nn.ReLU(),
+				layer_init(nn.Linear(64, 64)),
+				nn.ReLU(),
+			)
+			 
+			critic = nn.Sequential(
+				shared,
+				layer_init(nn.Linear(64, 1), std=1.0)
+			)
+
+			actor = nn.Sequential(
+				shared,
+				layer_init(nn.Linear(64, num_actions), std=0.01)
 			)
 	
 		case "sparse":
@@ -603,7 +622,7 @@ def train_gym_memory():
 	args = PPOArgs(
 		env_id = "ALE/Breakout-v5",
 		exp_name = name,
-		model_type="convolutional",
+		model_type="shared_control",
 		# wandb_project_name = name,
 		clip_coef = 0.1,
 		num_envs = 8,

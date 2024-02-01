@@ -3,7 +3,7 @@ import gym
 import numpy as np
 import random
 import torch as t
-from typing import Callable, Optional, Literal, Tuple
+from typing import Callable, Optional, Literal, Tuple, TypeAlias
 from dataclasses import dataclass, field
 import pandas as pd
 from IPython.display import display
@@ -34,10 +34,12 @@ from gym.wrappers.transform_observation import TransformObservation
 from gym.wrappers.normalize import NormalizeReward
 from gym.wrappers.transform_reward import TransformReward
 
+ModelType: TypeAlias = Literal["classic_control", "shared_control", "convolutional", "sparse"]
+
 @dataclass
 class PPOArgs:
     env_id: str
-    model_type: Literal["classic_control", "convolutional", "sparse"]
+    model_type: ModelType
     exp_name: str
     seed: int = 1
     cuda: bool = t.cuda.is_available()
