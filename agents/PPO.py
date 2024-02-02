@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Tuple, TypeVar, Union, Optional
 from jaxtyping import Float, Int
 import wandb
 
-from PPO_utils import ModelType, PPOArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env
+from PPO_utils import ModelType, PPOArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env, wrap_atari_simple_memory_env
 
 Arr = np.ndarray
 
@@ -683,10 +683,32 @@ def train_gym_pixels():
 	trainer = PPOTrainer(args)
 	return trainer.train()
 
+def train_gym_simple_memory(agent_path: Optional[str] = None):
+
+	name = "PPOMemory"
+	args = PPOArgs(
+		env_id = "ALE/Breakout-v5",
+		exp_name = name,
+		model_type="classic_control",
+		wandb_project_name = name,
+		total_timesteps=500_000,
+		clip_coef = 0.1,
+		num_envs = 8,
+		num_steps=128,
+		episodes_per_video=20,
+		make_kwargs={"obs_type": "ram"},
+		save_nth_epoch=50,
+		wrap_env=wrap_atari_simple_memory_env,
+	)
+
+	trainer = PPOTrainer(args, agent_path)
+	return trainer.train()
+
 if __name__ == "__main__":
 	# train_memory()
 	# train_pixels()
 
 	# train_gym_memory("PPOMemory-Epoch450.pt")
-	train_gym_memory()
+	# train_gym_memory()
+	train_gym_simple_memory()
 	# train_gym_pixels()

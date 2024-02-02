@@ -120,6 +120,31 @@ def wrap_atari_memory_env(env: gym.Env) -> gym.Env:
     env = FrameStack(env, num_stack=4)
     return env
 
+def wrap_atari_simple_memory_env(env: gym.Env) -> gym.Env:
+    env = wrap_atari_env(env)
+
+    def select_indices(obs: list[int]) -> list[int]:
+        board_state = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+        other_items = {
+            "lives": 57,
+            "paddle_from_right": 69,
+            "paddle_from_left": 71,
+            "ball_x": 99,
+            "ball_y": 101,
+            "ball_y_speed": 103,
+            "ball_x_speed": 105,
+        }
+
+        # num_obs = 24 + 7 = 31
+
+        indices = [*board_state, *other_items.values()]
+
+        return [obs[i] for i in indices]
+
+    env = TransformObservation(env, select_indices)
+    env = FrameStack(env, num_stack=4)
+    return env
+
 def wrap_atari_pixels_env(env: gym.Env) -> gym.Env:
     env = wrap_atari_env(env)
     env = ResizeObservation(env, shape=(84, 84))
