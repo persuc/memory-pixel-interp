@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 from tqdm import tqdm
 import numpy as np
+import numpy.typing as npt
 from numpy.random import Generator
 import torch as t
 from torch import Tensor
@@ -12,11 +13,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
 import einops
-from typing import Any, Dict, List, Tuple, TypeVar, Union, Optional
+from typing import Any, Callable, Dict, List, Tuple, TypeVar, Union, Optional
 from jaxtyping import Float, Int
 import wandb
 
-from PPO_utils import ModelType, PPOArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env, wrap_atari_simple_memory_env
+from PPO_utils import ModelType, PPOArgs, WrapperArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env
 
 Arr = np.ndarray
 
@@ -44,12 +45,15 @@ def layer_init(layer: nn.Module, std=np.sqrt(2), bias_const=0.0):
 def get_actor_and_critic(
 	envs: gym.vector.SyncVectorEnv,
 	mode: ModelType,
+	num_obs: Optional[int] = None, # override calculating num_obs from envs.single_observation_space
 ) -> Tuple[nn.Sequential, nn.Sequential, Optional[nn.Sequential]]:
 	'''
 	Returns (actor, critic), the networks used for PPO.
 	'''
 	obs_shape = envs.single_observation_space.shape
-	num_obs = np.array(obs_shape).prod()
+	if num_obs is not None:
+		obs_shape = obs_shape[:-1] + (num_obs,)
+	final_num_obs = np.array(obs_shape).prod()
 	num_actions = (
 		envs.single_action_space.n 
 		if isinstance(envs.single_action_space, gym.spaces.Discrete) 
@@ -60,7 +64,7 @@ def get_actor_and_critic(
 		case "classic_control":
 			critic = nn.Sequential(
 				nn.Flatten(),
-				layer_init(nn.Linear(num_obs, 64)),
+				layer_init(nn.Linear(final_num_obs, 64)),
 				nn.Tanh(),
 				layer_init(nn.Linear(64, 64)),
 				nn.Tanh(),
@@ -69,7 +73,7 @@ def get_actor_and_critic(
 
 			actor = nn.Sequential(
 				nn.Flatten(),
-				layer_init(nn.Linear(num_obs, 64)),
+				layer_init(nn.Linear(final_num_obs, 64)),
 				nn.Tanh(),
 				layer_init(nn.Linear(64, 64)),
 				nn.Tanh(),
@@ -107,7 +111,7 @@ def get_actor_and_critic(
 		case "shared_control":
 			shared = nn.Sequential(
 				nn.Flatten(),
-				layer_init(nn.Linear(num_obs, 64)),
+				layer_init(nn.Linear(final_num_obs, 64)),
 				nn.ReLU(),
 				layer_init(nn.Linear(64, 64)),
 				nn.ReLU(),
@@ -341,17 +345,17 @@ class PPOAgent(nn.Module):
 		self.steps = 0
 
 		# Get actor and critic networks
-		self.actor, self.critic, shared = get_actor_and_critic(envs, mode=args.model_type)
+		self.actor, self.critic, shared = get_actor_and_critic(envs, mode=args.model_type, num_obs=args.transformed_obs_shape)
 
-		if args.model_type == "shared_control":
-			def hook(module: nn.Module, inputs: List[t.Tensor], output: t.Tensor) -> None:
-					if self.steps % 100 == 0:
-						wandb.log({
-								"output_std": output.std(),
-								"output_max": output.max(),
-							}, step=self.steps)
+		# if args.model_type == "shared_control":
+		# 	def hook(module: nn.Module, inputs: List[t.Tensor], output: t.Tensor) -> None:
+		# 			if self.steps % 100 == 0:
+		# 				wandb.log({
+		# 						"output_std": output.std(),
+		# 						"output_max": output.max(),
+		# 					}, step=self.steps)
 
-			shared.register_forward_hook(hook)
+		# 	shared.register_forward_hook(hook)
 
 		# Define our first (obs, done), so we can start adding experiences to our replay memory
 		self.next_obs = t.tensor(envs.reset()).to(device, dtype=t.float)
@@ -360,6 +364,8 @@ class PPOAgent(nn.Module):
 		# Create our replay memory
 		self.memory = ReplayMemory(args, envs)
 
+	def transform_obs(self, obs: t.Tensor):
+		return self.args.transform_obs(obs, self.args) if self.args.transform_obs is not None else obs
 
 	def play_step(self) -> List[dict]:
 		'''
@@ -368,9 +374,12 @@ class PPOAgent(nn.Module):
 		# Get newest observations
 		obs = self.next_obs
 		dones = self.next_done
+
+		transformed_obs = self.transform_obs(obs)
+
 		# Compute logits based on newest observation, and use it to get an action distribution we sample from
 		with t.inference_mode():
-			logits = self.actor(obs)
+			logits = self.actor(transformed_obs)
 		probs = Categorical(logits=logits)
 		actions = probs.sample()
 		# Step environment based on the sampled action
@@ -379,7 +388,7 @@ class PPOAgent(nn.Module):
 		# Calculate logprobs and values, and add this all to replay memory
 		logprobs = probs.log_prob(actions)
 		with t.inference_mode():
-			values = self.critic(obs).flatten()
+			values = self.critic(transformed_obs).flatten()
 		self.memory.add(obs, actions, logprobs, values, rewards, dones)
 
 		# Set next observation, and increment global step counter
@@ -395,7 +404,8 @@ class PPOAgent(nn.Module):
 		Gets minibatches from the replay memory.
 		'''
 		with t.inference_mode():
-			next_value = self.critic(self.next_obs).flatten()
+			transformed_obs = self.transform_obs(self.next_obs)
+			next_value = self.critic(transformed_obs).flatten()
 		return self.memory.get_minibatches(next_value, self.next_done)
 
 # 2️⃣ LEARNING PHASE
@@ -493,7 +503,7 @@ def make_optimizer(agent: PPOAgent, total_training_steps: int, initial_lr: float
 class PPOTrainer:
 	max_reward_earned: Optional[int]
 
-	def __init__(self, args: PPOArgs, agent_path: Optional[str] = None):
+	def __init__(self, args: PPOArgs, wrapper: Optional[Callable[[WrapperArgs], gym.Env]] = None, agent_path: Optional[str] = None):
 		"""
 			Agent will be created if None. If not none, training will resume with agent as is.
 		"""
@@ -501,7 +511,13 @@ class PPOTrainer:
 		self.args = args
 		self.start_time = int(time.time())
 		self.run_name = f"{args.env_id}__{args.exp_name}__{self.start_time}".replace("/", "-")
-		made_envs = [make_env(args, args.seed + i, i, self.run_name) for i in range(args.num_envs)]
+		if args.wandb_project_name is not None: wandb.init(
+			project=args.wandb_project_name,
+			entity=args.wandb_entity,
+			name=self.run_name,
+			monitor_gym=args.episodes_per_video is not None
+		)
+		made_envs = [make_env(args, args.seed + i, i, self.run_name, wrapper) for i in range(args.num_envs)]
 		self.envs = gym.vector.SyncVectorEnv(made_envs)
 		self.agent = PPOAgent(args, self.envs).to(device)
 		self.optimizer, self.scheduler = make_optimizer(self.agent, args.total_training_steps, args.learning_rate, 0.0)
@@ -509,12 +525,6 @@ class PPOTrainer:
 		self.max_reward_earned = None # TODO: implement max reward seen thus far
 		if agent_path is not None:
 			self.load_agent(agent_path)
-		if args.wandb_project_name is not None: wandb.init(
-			project=args.wandb_project_name,
-			entity=args.wandb_entity,
-			name=self.run_name,
-			monitor_gym=args.episodes_per_video is not None
-		)
 
 	def rollout_phase(self) -> Tuple[Optional[float], Optional[float]]:
 		'''
@@ -573,9 +583,12 @@ class PPOTrainer:
 		'''
 		Handles learning phase for a single minibatch. Returns objective function to be maximized.
 		'''
-		logits = self.agent.actor(minibatch.observations)
+
+		transformed_obs = self.agent.transform_obs(minibatch.observations)
+
+		logits = self.agent.actor(transformed_obs)
 		probs = Categorical(logits=logits)
-		values = self.agent.critic(minibatch.observations).squeeze()
+		values = self.agent.critic(transformed_obs).squeeze()
 
 		clipped_surrogate_objective = calc_clipped_surrogate_objective(probs, minibatch.actions, minibatch.advantages, minibatch.logprobs, self.args.clip_coef)
 		value_loss = calc_value_function_loss(values, minibatch.returns, self.args.vf_coef)
@@ -659,13 +672,12 @@ def train_gym_memory(agent_path: Optional[str] = None):
 		episodes_per_video=20,
 		make_kwargs={"obs_type": "ram"},
 		save_nth_epoch=50,
-		wrap_env=wrap_atari_memory_env,
 	)
 
-	trainer = PPOTrainer(args, agent_path)
+	trainer = PPOTrainer(args, wrap_atari_memory_env, agent_path)
 	return trainer.train()
 
-def train_gym_pixels():
+def train_gym_pixels(agent_path: Optional[str] = None):
 	name = "PPOPixels"
 	args = PPOArgs(
 		env_id = "ALE/Breakout-v5",
@@ -677,19 +689,77 @@ def train_gym_pixels():
 		episodes_per_video=20,
 		make_kwargs={"obs_type": "grayscale"},
 		save_nth_epoch=50,
-		wrap_env=wrap_atari_pixels_env,
 	)
 
-	trainer = PPOTrainer(args)
+	trainer = PPOTrainer(args, wrap_atari_pixels_env, agent_path)
 	return trainer.train()
 
 def train_gym_simple_memory(agent_path: Optional[str] = None):
+
+	rolling_averages = []
+
+	def select_indices(obs: t.Tensor, args: PPOArgs, rolling_averages: list) -> t.Tensor:
+			
+		# obs.shape = (n_envs, n_frames, 128)
+
+		# select relevant items from the state
+		# num_obs = 24 + 7 = 31
+		board = obs[..., range(6, 30)]
+		other_items = {
+				"lives": obs[..., 57],
+				"paddle_from_right": obs[..., 69],
+				"paddle_from_left": obs[..., 71],
+				"ball_x": obs[..., 99],
+				"ball_y": obs[..., 101],
+				"ball_y_speed": obs[..., 103],
+				"ball_x_speed": obs[..., 105],
+		}
+
+		# n = 5
+		# 1, 2, 3 .. n / 254, 253, 252 .. 255-n -> 0..1
+		abs_max_speed = 8
+
+		# scale all values by their known max values
+		board_scaled = board / 255
+		other_items_scaled = {
+				"lives": obs[..., 57] / 5,
+				"paddle_from_right": obs[..., 69] / 255,
+				"paddle_from_left": obs[..., 71] / 255,
+				"ball_x": obs[..., 99] / 255,
+				"ball_y": obs[..., 101] / 255,
+				"ball_y_speed": ((obs[..., 103] + 128) % 255 - 128) / (2 * abs_max_speed) + 0.5,
+				"ball_x_speed": ((obs[..., 105] + 128) % 255 - 128) / (2 * abs_max_speed) + 0.5,
+		}
+
+		# calculate and log rolling averages
+		rolling_averages.append({
+				f"board[{i}]": board[..., i].mean() for i in range(24)
+		} | {
+				k: v.mean() for k, v in other_items.items()
+		})
+
+		if len(rolling_averages) > 20:
+				rolling_averages = rolling_averages[1:]
+
+		n = len(rolling_averages)
+
+		averages = {
+				f"board[{i}]": sum(rolling_averages[j][f"board[{i}]"] for j in range(n)) / n for i in range(24)
+		} | {
+				k: sum(rolling_averages[j][k] for j in range(n)) / n for k in other_items.keys()
+		}
+
+		if args.wandb_project_name is not None:
+			wandb.log(averages)
+
+		# assert result.shape == (8, 4, 31), f"Expected (8, 4, 31) got {result.shape}"
+		return t.concat((board_scaled, *[v.unsqueeze(-1) for v in other_items_scaled.values()]), -1)
 
 	name = "PPOMemory"
 	args = PPOArgs(
 		env_id = "ALE/Breakout-v5",
 		exp_name = name,
-		model_type="classic_control",
+		model_type="shared_control",
 		wandb_project_name = name,
 		total_timesteps=500_000,
 		clip_coef = 0.1,
@@ -698,10 +768,11 @@ def train_gym_simple_memory(agent_path: Optional[str] = None):
 		episodes_per_video=20,
 		make_kwargs={"obs_type": "ram"},
 		save_nth_epoch=50,
-		wrap_env=wrap_atari_simple_memory_env,
+		transform_obs=lambda obs, args: select_indices(obs, args, rolling_averages),
+		transformed_obs_shape=31,
 	)
 
-	trainer = PPOTrainer(args, agent_path)
+	trainer = PPOTrainer(args, wrap_atari_memory_env, agent_path)
 	return trainer.train()
 
 if __name__ == "__main__":

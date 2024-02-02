@@ -7,7 +7,6 @@ from typing import Callable, Optional, Literal, Tuple, TypeAlias
 from dataclasses import dataclass, field
 import pandas as pd
 from IPython.display import display
-Arr = np.ndarray
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -15,6 +14,8 @@ from einops import rearrange
 from typing import List, Optional
 from distutils.util import strtobool
 import argparse
+
+Arr = np.ndarray
 
 from atari_wrappers import (
     NoopResetEnv,
@@ -37,6 +38,38 @@ ModelType: TypeAlias = Literal["classic_control", "shared_control", "convolution
 
 @dataclass
 class PPOArgs:
+    """
+    Args:
+        exp_name: the name of this experiment
+        seed: seed of the experiment
+        cuda: if toggled, cuda will be enabled by default
+        log_dir: the directory where the logs will be stored
+        wandb_project_name: the wandb's project name. If None, logs will not be sent to wandb
+        wandb_entity: the entity (team) of wandb's project
+        episodes_per_video: Frequency to capture videos of the agent. If None, no videos will be recorded
+        env_id: the id of the environment
+        total_timesteps: total timesteps of the experiments
+        learning_rate: the learning rate of the optimizer
+        num_envs: number of synchronized vector environments in our `envs` object (this is N in the '37 Implementational Details' post)
+        num_steps: number of steps taken in the rollout phase (this is M in the '37 Implementational Details' post)
+        gamma: the discount factor gamma
+        gae_lambda: the discount factor used in our GAE estimation
+        num_minibatches: the number of minibatches you divide each batch up into
+        batches_per_learning_phase: how many times you loop through the data generated in each rollout phase
+        clip_coef: the epsilon term used in the clipped surrogate objective function
+        ent_coef: coefficient of entropy bonus term
+        vf_coef: cofficient of value loss function
+        max_grad_norm: value used in gradient clipping
+        save_nth_epoch: Frequency to save the state of the model to disk. If none, state will not be saved
+        make_kwargs: keyword arguments to be passed to gym.make()
+        transform_obs: Function to alter obs before they are passed to the agent / critic. If specified, may also specify transformed_obs_shape
+        transformed_obs_shape: int specifying shape of transformed obs
+        batch_size: N * M in the '37 Implementational Details' post (calculated from other values in PPOArgs)
+        minibatch_size: the size of a single minibatch we perform a gradient step on (calculated from other values in PPOArgs)
+        total_phases: total number of phases during training (calculated from other values in PPOArgs)
+        total_training_steps: total number of minibatches we will perform an update step on during training (calculated from other values in PPOArgs)
+    """
+
     env_id: str
     model_type: ModelType
     exp_name: str
@@ -45,7 +78,7 @@ class PPOArgs:
     log_dir: str = "logs"
     wandb_project_name: Optional[str] = None
     wandb_entity: Optional[str] = None
-    episodes_per_video: Optional[int] = 20 # if None, no videos will be recorded
+    episodes_per_video: Optional[int] = 20
     total_timesteps: int = 500_000
     learning_rate: float = 0.00025
     num_envs: int = 4
@@ -59,8 +92,9 @@ class PPOArgs:
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
     save_nth_epoch: Optional[int] = None
-    wrap_env: Optional[Callable[[gym.Env], gym.Env]] = None # function that adds wrappers to env
     make_kwargs: dict = field(default_factory=dict)
+    transform_obs: Optional[Callable[[t.Tensor, "PPOArgs"], t.Tensor]] = None
+    transformed_obs_shape: Optional[int] = None
 
     def __post_init__(self):
         self.batch_size = self.num_steps * self.num_envs
@@ -70,8 +104,20 @@ class PPOArgs:
         self.total_training_steps = self.total_phases * self.batches_per_learning_phase * self.num_minibatches
 
 
-def make_env(args: PPOArgs, seed: int, idx: int, run_name: str):
-    """Return a function that returns an environment after setting up boilerplate."""
+@dataclass
+class WrapperArgs:
+    env: gym.Env
+    args: PPOArgs
+    index: int
+
+def make_env(args: PPOArgs, seed: int, idx: int, run_name: str, wrap_env: Optional[Callable[[WrapperArgs], gym.Env]] = None):
+    """
+    Return a function that returns an environment after setting up boilerplate.
+
+    Args:
+        wrap_env: Function that adds wrappers to the env. Optionally accepts the PPOArgs and also the index of the vectorised environment it is running on
+    
+    """
 
     def thunk():
         env = gym.make(id=args.env_id, **args.make_kwargs)
@@ -84,8 +130,8 @@ def make_env(args: PPOArgs, seed: int, idx: int, run_name: str):
                     episode_trigger = lambda x : x % args.episodes_per_video == 0
                 )
 
-        if args.wrap_env is not None:
-            env = args.wrap_env(env)
+        if wrap_env is not None:
+            env = wrap_env(WrapperArgs(env, args, idx))
         
         obs = env.reset(seed=seed)
         env.action_space.seed(seed)
@@ -106,8 +152,8 @@ def make_env(args: PPOArgs, seed: int, idx: int, run_name: str):
 #     env = FrameStack(env, num_stack=4)
 #     return env
 
-def wrap_atari_env(env: gym.Env) -> gym.Env:
-    env = NoopResetEnv(env, noop_max=30)
+def wrap_atari_env(args: WrapperArgs) -> gym.Env:
+    env = NoopResetEnv(args.env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
     env = EpisodicLifeEnv(env, lambda env: env.unwrapped.ale.lives())
     if "FIRE" in env.unwrapped.get_action_meanings():
@@ -115,45 +161,20 @@ def wrap_atari_env(env: gym.Env) -> gym.Env:
     env = ClipRewardEnv(env)
     return env
 
-def wrap_atari_memory_env(env: gym.Env) -> gym.Env:
-    env = wrap_atari_env(env)
+def wrap_atari_memory_env(args: WrapperArgs) -> gym.Env:
+    env = wrap_atari_env(args)
     env = FrameStack(env, num_stack=4)
     return env
 
-def wrap_atari_simple_memory_env(env: gym.Env) -> gym.Env:
-    env = wrap_atari_env(env)
-
-    def select_indices(obs: list[int]) -> list[int]:
-        board_state = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
-        other_items = {
-            "lives": 57,
-            "paddle_from_right": 69,
-            "paddle_from_left": 71,
-            "ball_x": 99,
-            "ball_y": 101,
-            "ball_y_speed": 103,
-            "ball_x_speed": 105,
-        }
-
-        # num_obs = 24 + 7 = 31
-
-        indices = [*board_state, *other_items.values()]
-
-        return [obs[i] for i in indices]
-
-    env = TransformObservation(env, select_indices)
-    env = FrameStack(env, num_stack=4)
-    return env
-
-def wrap_atari_pixels_env(env: gym.Env) -> gym.Env:
-    env = wrap_atari_env(env)
+def wrap_atari_pixels_env(args: WrapperArgs) -> gym.Env:
+    env = wrap_atari_env(args)
     env = ResizeObservation(env, shape=(84, 84))
     env = FrameStack(env, num_stack=4)
     return env
 
 
-def wrap_mujoco_env(env: gym.Env):
-    env = ClipAction(env)
+def wrap_mujoco_env(args: WrapperArgs) -> gym.Env:
+    env = ClipAction(args.env)
     env = NormalizeObservation(env)
     env = TransformObservation(env, lambda obs: np.clip(obs, -10, 10))
     env = NormalizeReward(env)
@@ -218,70 +239,6 @@ def sum_rewards(rewards : List[int], gamma : float = 1):
         total_reward *= gamma
     total_reward += rewards[0]
     return total_reward
-
-arg_help_strings = dict(
-    exp_name = "the name of this experiment",
-    seed = "seed of the experiment",
-    cuda = "if toggled, cuda will be enabled by default",
-    log_dir = "the directory where the logs will be stored",
-    use_wandb = "if toggled, this experiment will be tracked with Weights and Biases",
-    wandb_project_name = "the wandb's project name",
-    wandb_entity = "the entity (team) of wandb's project",
-    capture_video = "whether to capture videos of the agent performances (check out `videos` folder)",
-    env_id = "the id of the environment",
-    total_timesteps = "total timesteps of the experiments",
-    learning_rate = "the learning rate of the optimizer",
-    num_envs = "number of synchronized vector environments in our `envs` object (this is N in the '37 Implementational Details' post)",
-    num_steps = "number of steps taken in the rollout phase (this is M in the '37 Implementational Details' post)",
-    gamma = "the discount factor gamma",
-    gae_lambda = "the discount factor used in our GAE estimation",
-    num_minibatches = "the number of minibatches you divide each batch up into",
-    batches_per_learning_phase = "how many times you loop through the data generated in each rollout phase",
-    clip_coef = "the epsilon term used in the clipped surrogate objective function",
-    ent_coef = "coefficient of entropy bonus term",
-    vf_coef = "cofficient of value loss function",
-    max_grad_norm = "value used in gradient clipping",
-    mode = "can be 'classic-control', 'atari' or 'mujoco'",
-    batch_size = "N * M in the '37 Implementational Details' post (calculated from other values in PPOArgs)",
-    minibatch_size = "the size of a single minibatch we perform a gradient step on (calculated from other values in PPOArgs)",
-    total_phases = "total number of phases during training (calculated from other values in PPOArgs)",
-    total_training_steps = "total number of minibatches we will perform an update step on during training (calculated from other values in PPOArgs)",
-)
-
-def arg_help_PPO(args: Optional[PPOArgs], print_df=False):
-    """Prints out a nicely displayed list of arguments, their default values, and what they mean."""
-    if args is None:
-        args = PPOArgs()
-        changed_args = []
-    else:
-        default_args = PPOArgs()
-        changed_args = [key for key in default_args.__dict__ if getattr(default_args, key) != getattr(args, key)]
-    df = pd.DataFrame([arg_help_strings]).T
-    df.columns = ["description"]
-    df["default value"] = [repr(getattr(args, name)) for name in df.index]
-    df.index.name = "arg"
-    df = df[["default value", "description"]]
-    if print_df:
-        df.insert(1, "changed?", ["yes" if i in changed_args else "" for i in df.index])
-        with pd.option_context(
-            'max_colwidth', 0, 
-            'display.width', 150, 
-            'display.colheader_justify', 'left'
-        ):
-            print(df)
-    else:
-        s = (
-            df.style
-            .set_table_styles([
-                {'selector': 'td', 'props': 'text-align: left;'},
-                {'selector': 'th', 'props': 'text-align: left;'}
-            ])
-            .apply(lambda row: ['background-color: red' if row.name in changed_args else None] + [None,] * (len(row) - 1), axis=1)
-        )
-        with pd.option_context("max_colwidth", 0):
-            display(s)
-
-# %%
 
 def plot_cartpole_obs_and_dones(obs: t.Tensor, done: t.Tensor):
     """
