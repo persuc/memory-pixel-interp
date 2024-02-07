@@ -198,7 +198,7 @@ def test_ppo_scheduler(my_PPOScheduler):
     agent = solutions.PPOAgent(args, envs)
 
     optimizer = t.optim.Adam(agent.parameters(), lr=0.1, eps=1e-8, maximize=True)
-    scheduler: solutions.PPOScheduler = my_PPOScheduler(optimizer, initial_lr=0.1, end_lr=0.5, total_training_steps=4)
+    scheduler: solutions.OptimizerScheduler = my_PPOScheduler(optimizer, initial_lr=0.1, end_lr=0.5, total_training_steps=4)
 
     scheduler.step()
     assert (scheduler.n_step_calls == 1)
@@ -421,5 +421,5 @@ if __name__ == "__main__":
   test_calc_clipped_surrogate_objective(solutions.calc_clipped_surrogate_objective)
   test_calc_value_function_loss(solutions.calc_value_function_loss)
   test_calc_entropy_bonus(solutions.calc_entropy_bonus)
-  test_ppo_scheduler(solutions.PPOScheduler)
+  test_ppo_scheduler(solutions.OptimizerScheduler)
   

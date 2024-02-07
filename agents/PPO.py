@@ -7,17 +7,16 @@ import numpy.typing as npt
 from numpy.random import Generator
 import torch as t
 from torch import Tensor
-from torch.optim.optimizer import Optimizer
 import gym
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions.categorical import Categorical
 import einops
-from typing import Any, Callable, Dict, List, Tuple, TypeVar, Union, Optional
+from typing import Any, Callable, Dict, List, Tuple, Union, Optional
 from jaxtyping import Float, Int
 import wandb
 
-from PPO_utils import ModelType, PPOArgs, WrapperArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env
+from PPO_utils import ConstScheduler, LinearScheduler, ModelType, OptimizerScheduler, PPOArgs, WrapperArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env
 
 Arr = np.ndarray
 
@@ -473,29 +472,10 @@ def calc_entropy_bonus(probs: Categorical, ent_coef: float):
 	return ent_coef * probs.entropy().mean()
 
 
-
-class PPOScheduler:
-	def __init__(self, optimizer: Optimizer, initial_lr: float, end_lr: float, total_training_steps: int):
-		self.optimizer = optimizer
-		self.initial_lr = initial_lr
-		self.end_lr = end_lr
-		self.total_training_steps = total_training_steps
-		self.n_step_calls = 0
-
-	def step(self):
-		'''Implement linear learning rate decay so that after total_training_steps calls to step, the learning rate is end_lr.
-		'''
-		self.n_step_calls += 1
-		frac = self.n_step_calls / self.total_training_steps
-		assert frac <= 1
-		for param_group in self.optimizer.param_groups:
-			param_group["lr"] = self.initial_lr + frac * (self.end_lr - self.initial_lr)
-
-
-def make_optimizer(agent: PPOAgent, total_training_steps: int, initial_lr: float, end_lr: float) -> Tuple[optim.Adam, PPOScheduler]:
+def make_optimizer(agent: PPOAgent, total_training_steps: int, initial_lr: float, end_lr: float) -> Tuple[optim.Adam, OptimizerScheduler]:
 	'''Return an appropriately configured Adam with its attached scheduler.'''
 	optimizer = optim.Adam(agent.parameters(), lr=initial_lr, eps=1e-5, maximize=True)
-	scheduler = PPOScheduler(optimizer, initial_lr, end_lr, total_training_steps)
+	scheduler = OptimizerScheduler(optimizer, initial_lr, end_lr, total_training_steps)
 	return (optimizer, scheduler)
 
 # 3️⃣ TRAINING LOOP
@@ -521,6 +501,10 @@ class PPOTrainer:
 		self.envs = gym.vector.SyncVectorEnv(made_envs)
 		self.agent = PPOAgent(args, self.envs).to(device)
 		self.optimizer, self.scheduler = make_optimizer(self.agent, args.total_training_steps, args.learning_rate, 0.0)
+		if isinstance(args.ent_coef, (int, float)):
+			self.ent_scheduler = ConstScheduler(args.ent_coef)
+		else:
+			self.ent_scheduler = args.ent_coef
 		self.epoch = 0
 		self.max_reward_earned = None # TODO: implement max reward seen thus far
 		if agent_path is not None:
@@ -578,6 +562,7 @@ class PPOTrainer:
 			self.optimizer.step()
 			self.optimizer.zero_grad()
 			self.scheduler.step()
+			self.steps += 1
 
 	def compute_ppo_objective(self, minibatch: ReplayMinibatch) -> Float[Tensor, ""]:
 		'''
@@ -592,7 +577,7 @@ class PPOTrainer:
 
 		clipped_surrogate_objective = calc_clipped_surrogate_objective(probs, minibatch.actions, minibatch.advantages, minibatch.logprobs, self.args.clip_coef)
 		value_loss = calc_value_function_loss(values, minibatch.returns, self.args.vf_coef)
-		entropy_bonus = calc_entropy_bonus(probs, self.args.ent_coef)
+		entropy_bonus = calc_entropy_bonus(probs, self.ent_scheduler.get(self.steps))
 
 		total_objective_function = clipped_surrogate_objective - value_loss + entropy_bonus
 
@@ -622,6 +607,7 @@ class PPOTrainer:
 
 		avg_episode_len = 0
 		avg_episode_steps = 0
+		self.steps = 0
 
 		for epoch in progress_bar:
 			self.epoch += 1
@@ -763,6 +749,7 @@ def train_gym_simple_memory(agent_path: Optional[str] = None):
 		wandb_project_name = name,
 		total_timesteps=500_000,
 		clip_coef = 0.1,
+		ent_coef=LinearScheduler(0.1, 0.01, 100_000),
 		num_envs = 8,
 		num_steps=128,
 		episodes_per_video=20,

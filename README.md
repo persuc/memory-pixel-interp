@@ -81,3 +81,7 @@ RAM) of the game "breakout" as state.
 [ ] Repeat the __GBC breakout__ experiment across a wider variety of Gameboy Color games and extract features for all games
 
 [ ] Use the __pixel_agent__'s function vectors as a guide to which RAM addresses map to which parts of the screen, and annotate activations chart with pictures of the screen
+
+## References
+
+https://github.com/k4ntz/OC_Atari

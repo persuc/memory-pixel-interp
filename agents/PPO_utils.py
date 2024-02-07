@@ -3,6 +3,7 @@ import gym
 import numpy as np
 import random
 import torch as t
+from torch.optim.optimizer import Optimizer
 from typing import Callable, Optional, Literal, Tuple, TypeAlias
 from dataclasses import dataclass, field
 import pandas as pd
@@ -35,6 +36,46 @@ from gym.wrappers.normalize import NormalizeReward
 from gym.wrappers.transform_reward import TransformReward
 
 ModelType: TypeAlias = Literal["classic_control", "shared_control", "convolutional", "sparse"]
+
+class BaseScheduler:
+     def get(self, step: int) -> float:
+          raise NotImplemented()
+
+class ConstScheduler(BaseScheduler):
+	def __init__(self, value: float):
+		self.value = value
+
+	def get(self, _step: int):
+		return self.value
+
+class LinearScheduler(BaseScheduler):
+	def __init__(self, initial_value: float, end_value: float, end_step: int):
+		self.initial_value = initial_value
+		self.end_value = end_value
+		self.total_training_steps = end_step
+
+	def get(self, step: int):
+		'''Implement linear decay so that after end_step calls to step, the value is end_value.
+		'''
+		frac = min(step / self.total_training_steps, 1)
+		return self.initial_value + frac * (self.end_value - self.initial_value)
+
+class OptimizerScheduler:
+	def __init__(self, optimizer: Optimizer, initial_lr: float, end_lr: float, total_training_steps: int):
+		self.optimizer = optimizer
+		self.initial_lr = initial_lr
+		self.end_lr = end_lr
+		self.total_training_steps = total_training_steps
+		self.n_step_calls = 0
+
+	def step(self):
+		'''Implement linear learning rate decay so that after total_training_steps calls to step, the learning rate is end_lr.
+		'''
+		self.n_step_calls += 1
+		frac = self.n_step_calls / self.total_training_steps
+		assert frac <= 1
+		for param_group in self.optimizer.param_groups:
+			param_group["lr"] = self.initial_lr + frac * (self.end_lr - self.initial_lr)
 
 @dataclass
 class PPOArgs:
@@ -88,7 +129,7 @@ class PPOArgs:
     num_minibatches: int = 4
     batches_per_learning_phase: int = 4
     clip_coef: float = 0.2
-    ent_coef: float = 0.01
+    ent_coef: float | BaseScheduler = 0.01
     vf_coef: float = 0.5
     max_grad_norm: float = 0.5
     save_nth_epoch: Optional[int] = None
