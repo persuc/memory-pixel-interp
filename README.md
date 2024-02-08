@@ -1,35 +1,43 @@
 ## Getting Started
 
-Clone the repo (with submodules):
-`git clone --recurse-submodules -j8 https://github.com/persuck/memory-pixel-interp.git`
+Clone the repo:
 
-If you already cloned the repo but need to clone the submodules:
-`git submodule update --init --recursive`
+`git clone https://github.com/persuck/memory-pixel-interp.git`
 
 Install deps:
-`pip install -r requirements.txt`
-`pip install "gym[accept-rom-license, atari]"`
 
-Or make a virtual env:
+`./setup.sh`
+
+Or run the commands yourself:
+
+```sh
+pip install -r requirements.txt
+# To get video logging to work you may need to install video codecs:
+conda install -c conda-forge x264
+```
+
+> <!-- https://pytorch.org/audio/stable/build.ffmpeg.html -->
+> <!-- `conda update --force conda` -->
+> <!-- pytorch::ffmpeg-4.3-hf484d3e_0 > pkgs/main::ffmpeg-4.2.2-h20bf706_0 -->
+> <!-- `apt-get update && apt-get install ffmpeg libsm6 libxext6 -y` -->
+
+Optional - make a virtual env before pip install:
+
 `python -m venv env && source ./env/bin/activate && pip install -r requirements.txt`
 
 (VsCode) Install recommended extensions:
-```
-⌘⇧P
-Extensions: Show Recommended Extensions
-☁ Install Workspace Recommended Extensions
-```
+1. ⌘⇧P
+2. Extensions: Show Recommended Extensions
+3. ☁ Install Workspace Recommended Extensions
 
 (VastAI) Select default python env:
-`python 3.10.13 ('base')`
+
+```python 3.10.13 ('base')```
 
 (VastAI) If you don't like tmux:
-`touch ~/.no_auto_tmux`
 
-To get video logging to work you may need to install video codecs:
-<!-- https://pytorch.org/audio/stable/build.ffmpeg.html -->
-`conda update --force conda` <!-- pytorch::ffmpeg-4.3-hf484d3e_0 > pkgs/main::ffmpeg-4.2.2-h20bf706_0 -->
-`conda install -c conda-forge x264`
+```touch ~/.no_auto_tmux```
+
 
 
 ## Summary

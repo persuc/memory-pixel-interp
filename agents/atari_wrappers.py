@@ -5,9 +5,6 @@ from collections import deque
 import gym
 from gym.wrappers.transform_reward import TransformReward
 from gym import spaces
-import cv2
-cv2.ocl.setUseOpenCL(False)
-
 
 class TimeLimit(gym.Wrapper):
     _max_episode_steps: int | None
