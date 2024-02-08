@@ -15,7 +15,11 @@ Or run the commands yourself:
 ```sh
 pip install -r requirements.txt
 # To get video logging to work you may need to install video codecs:
-conda install -c conda-forge x264
+# check if "libx264" is installed:
+ffmpeg -encoders | grep 264
+# install them if necessary
+# conda install -y -c conda-forge x264
+conda install -y -c conda-forge x264=='1!164.3095' ffmpeg=6.1.1
 ```
 
 > <!-- https://pytorch.org/audio/stable/build.ffmpeg.html -->
