@@ -16,7 +16,7 @@ plotly==5.18.0
 pyboy==1.6.13
 pygame==2.5.2
 rich==13.7.0
-torch==2.1.2
-torchvision==0.16.2
-tqdm==4.66.1
+torch==2.2.0
+torchvision==0.17.0
+tqdm==4.65.0
 wandb==0.13.10

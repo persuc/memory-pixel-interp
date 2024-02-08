@@ -1,5 +1,7 @@
 ## Getting Started
 
+This repo was designed to be run in the [pytorch/pytorch](https://github.com/pytorch/pytorch/blob/main/Dockerfile) docker image.
+
 Clone the repo:
 
 `git clone https://github.com/persuck/memory-pixel-interp.git`
@@ -25,20 +27,11 @@ Optional - make a virtual env before pip install:
 
 `python -m venv env && source ./env/bin/activate && pip install -r requirements.txt`
 
-(VsCode) Install recommended extensions:
+VSCode:
 1. ⌘⇧P
 2. Extensions: Show Recommended Extensions
 3. ☁ Install Workspace Recommended Extensions
-
-(VastAI) Select default python env:
-
-```python 3.10.13 ('base')```
-
-(VastAI) If you don't like tmux:
-
-```touch ~/.no_auto_tmux```
-
-
+4. Select default python env: `python 3.10.13 ('base')`
 
 ## Summary
 
