@@ -31,7 +31,8 @@ current_ram = [0] * 256
 previous_ram = [0] * 256
 step = 0
 console = Console()
-special_numbers = set()
+# special_numbers = set()
+special_numbers = set([*list(range(6, 30)), 57, 70, 72, 77, 99, 101, 103, 105])
 special_metric = [0] * 128
 max_specialness = 10
 
@@ -46,8 +47,8 @@ def compare_bits(a, b):
 def format_memory(idx: int, obs: list[int], previous_ram: list[int]):
         if idx >= 128:
             return ""
-        # if idx in special_numbers:
-        #     return f"[bold #00ffff]{obs[idx]}[/bold #00ffff]"
+        if idx in special_numbers:
+            return f"[bold #00ffff]{obs[idx]}[/bold #00ffff]"
         # if special_metric[idx]:
         # if special_metric[idx] > 0:
         #     specialness = round(special_metric[idx] / max_specialness * 255)
@@ -110,7 +111,7 @@ while action_idx < len(actions):
     #         if v != initial_ram[i]:
     #             important_idxs.add(v)
 
-    count_bit_changes(obs, previous_ram)
+    # count_bit_changes(obs, previous_ram)
 
     previous_ram = obs
     print_memory(obs, previous_ram)
@@ -142,9 +143,8 @@ while action_idx < len(actions):
 
 # 6-29: board state (0-255, always divisible by 3)
 # 57: lives (0-5)
-# 69: distance from right wall (0-255)
-# 71: distance from left wall (0-255)
-# 72: counter/clock
+# 70: distance from right wall (0-255)
+# 72: distance from left wall (0-255)
 # 77: score (0-max score)
 # 99: ball x pos (0-255)
 # 101: ball y pos (0-255) bottom of screen ~= 210

@@ -693,8 +693,8 @@ def train_gym_simple_memory(agent_path: Optional[str] = None):
 		board = obs[..., range(6, 30)]
 		other_items = {
 				"lives": obs[..., 57],
-				"paddle_from_right": obs[..., 69],
-				"paddle_from_left": obs[..., 71],
+				"paddle_from_right": obs[..., 70],
+				"paddle_from_left": obs[..., 72],
 				"ball_x": obs[..., 99],
 				"ball_y": obs[..., 101],
 				"ball_y_speed": obs[..., 103],
@@ -709,8 +709,8 @@ def train_gym_simple_memory(agent_path: Optional[str] = None):
 		board_scaled = board / 255
 		other_items_scaled = {
 				"lives": obs[..., 57] / 5,
-				"paddle_from_right": obs[..., 69] / 255,
-				"paddle_from_left": obs[..., 71] / 255,
+				"paddle_from_right": obs[..., 70] / 255,
+				"paddle_from_left": obs[..., 72] / 255,
 				"ball_x": obs[..., 99] / 255,
 				"ball_y": obs[..., 101] / 255,
 				"ball_y_speed": ((obs[..., 103] + 128) % 255 - 128) / (2 * abs_max_speed) + 0.5,
