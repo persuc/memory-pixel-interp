@@ -35,7 +35,7 @@ from gym.wrappers.transform_observation import TransformObservation
 from gym.wrappers.normalize import NormalizeReward
 from gym.wrappers.transform_reward import TransformReward
 
-ModelType: TypeAlias = Literal["classic_control", "shared_control", "convolutional", "sparse"]
+ModelType: TypeAlias = Literal["classic_control", "shared_control", "relu_control", "convolutional", "sparse"]
 
 class BaseScheduler:
      def get(self, step: int) -> float:
@@ -92,7 +92,7 @@ class PPOArgs:
         total_timesteps: total timesteps of the experiments
         learning_rate: the learning rate of the optimizer
         num_envs: number of synchronized vector environments in our `envs` object (this is N in the '37 Implementational Details' post)
-        num_steps: number of steps taken in the rollout phase (this is M in the '37 Implementational Details' post)
+        num_steps: number of steps taken per epoch in the rollout phase (this is M in the '37 Implementational Details' post)
         gamma: the discount factor gamma
         gae_lambda: the discount factor used in our GAE estimation
         num_minibatches: the number of minibatches you divide each batch up into

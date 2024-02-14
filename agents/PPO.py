@@ -107,6 +107,25 @@ def get_actor_and_critic(
 				layer_init(nn.Linear(512, 1), std=1)
 			)
 
+		case "relu_control":
+			critic = nn.Sequential(
+				nn.Flatten(),
+				layer_init(nn.Linear(final_num_obs, 64)),
+				nn.ReLU(),
+				layer_init(nn.Linear(64, 64)),
+				nn.ReLU(),
+				layer_init(nn.Linear(64, 1), std=1.0)
+			)
+
+			actor = nn.Sequential(
+				nn.Flatten(),
+				layer_init(nn.Linear(final_num_obs, 64)),
+				nn.ReLU(),
+				layer_init(nn.Linear(64, 64)),
+				nn.ReLU(),
+				layer_init(nn.Linear(64, num_actions), std=0.01)
+			)
+
 		case "shared_control":
 			shared = nn.Sequential(
 				nn.Flatten(),
@@ -344,7 +363,7 @@ class PPOAgent(nn.Module):
 		self.steps = 0
 
 		# Get actor and critic networks
-		self.actor, self.critic, shared = get_actor_and_critic(envs, mode=args.model_type, num_obs=args.transformed_obs_shape)
+		self.actor, self.critic, _shared = get_actor_and_critic(envs, mode=args.model_type, num_obs=args.transformed_obs_shape)
 
 		# if args.model_type == "shared_control":
 		# 	def hook(module: nn.Module, inputs: List[t.Tensor], output: t.Tensor) -> None:
@@ -745,13 +764,15 @@ def train_gym_simple_memory(agent_path: Optional[str] = None):
 	args = PPOArgs(
 		env_id = "ALE/Breakout-v5",
 		exp_name = name,
-		model_type="shared_control",
+		model_type="relu_control",
 		wandb_project_name = name,
 		total_timesteps=500_000,
-		clip_coef = 0.1,
-		ent_coef=LinearScheduler(0.1, 0.01, 100_000),
+		learning_rate=0.0001,
+		clip_coef=0.1,
+		ent_coef=ConstScheduler(0.001),
 		num_envs = 8,
-		num_steps=128,
+		num_steps=512,
+		num_minibatches=8,
 		episodes_per_video=20,
 		make_kwargs={"obs_type": "ram"},
 		save_nth_epoch=50,
