@@ -66,13 +66,11 @@ class OptimizerScheduler:
 		self.initial_lr = initial_lr
 		self.end_lr = end_lr
 		self.total_training_steps = total_training_steps
-		self.n_step_calls = 0
 
-	def step(self):
+	def step(self, step: int):
 		'''Implement linear learning rate decay so that after total_training_steps calls to step, the learning rate is end_lr.
 		'''
-		self.n_step_calls += 1
-		frac = self.n_step_calls / self.total_training_steps
+		frac = step / self.total_training_steps
 		assert frac <= 1
 		for param_group in self.optimizer.param_groups:
 			param_group["lr"] = self.initial_lr + frac * (self.end_lr - self.initial_lr)

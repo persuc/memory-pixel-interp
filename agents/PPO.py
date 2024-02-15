@@ -519,7 +519,7 @@ class PPOTrainer:
 		made_envs = [make_env(args, args.seed + i, i, self.run_name, wrapper) for i in range(args.num_envs)]
 		self.envs = gym.vector.SyncVectorEnv(made_envs)
 		self.agent = PPOAgent(args, self.envs).to(device)
-		self.optimizer, self.scheduler = make_optimizer(self.agent, args.total_training_steps, args.learning_rate, 0.0)
+		self.optimizer, self.optimizer_scheduler = make_optimizer(self.agent, args.total_training_steps, args.learning_rate, 0.0)
 		if isinstance(args.ent_coef, (int, float)):
 			self.ent_scheduler = ConstScheduler(args.ent_coef)
 		else:
@@ -578,10 +578,10 @@ class PPOTrainer:
 			objective_fn = self.compute_ppo_objective(minibatch)
 			objective_fn.backward()
 			nn.utils.clip_grad.clip_grad_norm_(self.agent.parameters(), self.args.max_grad_norm)
+			self.steps += 1
 			self.optimizer.step()
 			self.optimizer.zero_grad()
-			self.scheduler.step()
-			self.steps += 1
+			self.optimizer_scheduler.step(self.steps)
 
 	def compute_ppo_objective(self, minibatch: ReplayMinibatch) -> Float[Tensor, ""]:
 		'''
@@ -609,7 +609,7 @@ class PPOTrainer:
 		if self.args.wandb_project_name is not None: wandb.log(dict(
 			total_steps = self.agent.steps,
 			values = values.mean().item(),
-			learning_rate = self.scheduler.optimizer.param_groups[0]["lr"],
+			learning_rate = self.optimizer_scheduler.optimizer.param_groups[0]["lr"],
 			value_loss = value_loss.item(),
 			clipped_surrogate_objective = clipped_surrogate_objective.item(),
 			entropy = entropy_bonus.item(),
