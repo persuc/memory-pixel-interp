@@ -376,7 +376,7 @@ class PPOAgent(nn.Module):
 		# 	shared.register_forward_hook(hook)
 
 		# Define our first (obs, done), so we can start adding experiences to our replay memory
-		self.next_obs = t.tensor(envs.reset()).to(device, dtype=t.float)
+		self.next_obs = t.tensor(envs.reset(seed=1)).to(device, dtype=t.float)
 		self.next_done = t.zeros(envs.num_envs).to(device, dtype=t.float)
 
 		# Create our replay memory
