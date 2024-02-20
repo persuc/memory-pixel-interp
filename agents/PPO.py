@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Tuple, Union, Optional
 from jaxtyping import Float, Int
 import wandb
 
-from PPO_utils import ConstScheduler, LinearScheduler, ModelType, OptimizerScheduler, PPOArgs, WrapperArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env
+from PPO_utils import ConstScheduler, LinearScheduler, ModelType, OptimizerScheduler, PPOArgs, WrapperArgs, make_env, set_global_seeds, wrap_atari_memory_env, wrap_atari_pixels_env, wrap_atari_simple_memory_env
 
 Arr = np.ndarray
 
@@ -400,6 +400,7 @@ class PPOAgent(nn.Module):
 			logits = self.actor(transformed_obs)
 		probs = Categorical(logits=logits)
 		actions = probs.sample()
+		
 		# Step environment based on the sampled action
 		next_obs, rewards, next_dones, infos = self.envs.step(actions.cpu().numpy())
 
@@ -764,23 +765,25 @@ def train_gym_simple_memory(agent_path: Optional[str] = None):
 	args = PPOArgs(
 		env_id = "ALE/Breakout-v5",
 		exp_name = name,
-		model_type="relu_control",
+		model_type="shared_control",
 		wandb_project_name = name,
+		seed=918841047,
 		total_timesteps=500_000,
-		learning_rate=0.0001,
-		clip_coef=0.1,
-		ent_coef=ConstScheduler(0.001),
+		learning_rate=0.0025,
+		clip_coef=0.2,
+		ent_coef=ConstScheduler(0.01),
 		num_envs = 8,
-		num_steps=512,
-		num_minibatches=8,
-		episodes_per_video=20,
+		num_steps=128,
+		num_minibatches=4,
+		max_episode_steps=7500,
+		episodes_per_video=16,
 		make_kwargs={"obs_type": "ram"},
 		save_nth_epoch=50,
 		transform_obs=lambda obs, args: select_indices(obs, args, rolling_averages),
 		transformed_obs_shape=31,
 	)
 
-	trainer = PPOTrainer(args, wrap_atari_memory_env, agent_path)
+	trainer = PPOTrainer(args, wrap_atari_simple_memory_env, agent_path)
 	return trainer.train()
 
 if __name__ == "__main__":
@@ -790,4 +793,5 @@ if __name__ == "__main__":
 	# train_gym_memory("PPOMemory-Epoch450.pt")
 	# train_gym_memory()
 	train_gym_simple_memory()
+	# train_gym_simple_memory("states/ALE-Breakout-v5__PPOMemory__1708389067/Epoch-150.pt")
 	# train_gym_pixels()

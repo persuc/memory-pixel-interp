@@ -24,6 +24,7 @@ from atari_wrappers import (
     EpisodicLifeEnv,
     FireResetEnv, # only if "FIRE" is in env.unwrapped.get_action_meanings()
     ClipRewardEnv,
+    TimeLimit,
 )
 from gym.wrappers.frame_stack import FrameStack
 from gym.wrappers.resize_observation import ResizeObservation
@@ -126,6 +127,7 @@ class PPOArgs:
     gae_lambda: float = 0.95
     num_minibatches: int = 4
     batches_per_learning_phase: int = 4
+    max_episode_steps: Optional[int] = None
     clip_coef: float = 0.2
     ent_coef: float | BaseScheduler = 0.01
     vf_coef: float = 0.5
@@ -203,6 +205,54 @@ def wrap_atari_env(args: WrapperArgs) -> gym.Env:
 def wrap_atari_memory_env(args: WrapperArgs) -> gym.Env:
     env = wrap_atari_env(args)
     env = FrameStack(env, num_stack=4)
+    return env
+
+class BreakoutRandomEnv(gym.Wrapper):
+    def __init__(self, env, seed: int):
+        """Randomise the ball start position
+        """
+        gym.Wrapper.__init__(self, env)
+        self.rng = np.random.default_rng(seed + 1)
+        self.ale = env.unwrapped.ale
+        self.awaiting_launch = False
+        self.new_x = 0
+
+    def step(self, ac):
+        ram = self.ale.getRAM()
+        if ac == 1 and (ram[101] == 0 or ram[101] >= 208):
+            self.awaiting_launch = True
+            self.new_x = self.rng.integers(64, 201)
+            # self.new_x = round(self.rng.normal(loc=0, scale=0.5) * 74 % 148) + 56
+
+        obs, rewards, dones, infos = self.env.step(ac)
+
+        ram = self.ale.getRAM()
+        if self.awaiting_launch:
+            self.awaiting_launch = False
+
+            self.ale.setRAM(99, self.new_x)
+            self.ale.setRAM(101, 112) # set y position to spawn position
+            self.ale.setRAM(105, 0) # set x speed to 0
+            # assert self.ale.getRAM()[105] == 0, f"RAM[105] ball x speed != 0, got {self.ale.getRAM(105)}"
+
+            obs[99] = self.new_x
+            obs[101] = 112
+            obs[105] = 0
+
+        return obs, rewards, dones, infos
+        
+
+def wrap_atari_simple_memory_env(args: WrapperArgs) -> gym.Env:
+    env = BreakoutRandomEnv(args.env, args.args.seed)
+    env = NoopResetEnv(env, noop_max=30)
+    env = MaxAndSkipEnv(env, skip=4)
+    env = EpisodicLifeEnv(env, lambda env: env.unwrapped.ale.lives())
+    if "FIRE" in env.unwrapped.get_action_meanings():
+        env = FireResetEnv(env)
+    env = ClipRewardEnv(env)
+    env = FrameStack(env, num_stack=4)
+    if args.args.max_episode_steps:
+        env = TimeLimit(env, args.args.max_episode_steps)
     return env
 
 def wrap_atari_pixels_env(args: WrapperArgs) -> gym.Env:
